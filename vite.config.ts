@@ -1,0 +1,29 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      // Proxy Premiumize API calls to avoid CORS in development
+      '/pmapi': {
+        target: 'https://www.premiumize.me',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/pmapi/, '/api'),
+        secure: true,
+      }
+    }
+  },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'hls': ['hls.js'],
+          'dexie': ['dexie'],
+        }
+      }
+    }
+  }
+})
