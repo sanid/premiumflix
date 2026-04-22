@@ -1,6 +1,7 @@
 {
   "routes": [
     { "src": "/api/tmdb/(.*)", "dest": "/api/tmdb.js" },
+    { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
