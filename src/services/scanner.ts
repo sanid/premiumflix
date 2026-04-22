@@ -458,13 +458,11 @@ async function fetchMovieMeta(movie: Movie): Promise<void> {
     movie.tmdbId = detail.id
     movie.tmdbDetail = detail
 
-    const [credits, videos, images] = await Promise.allSettled([
-      movieCredits(detail.id),
+    const [videos, images] = await Promise.allSettled([
       movieVideos(detail.id),
       movieImages(detail.id),
     ])
 
-    if (credits.status === 'fulfilled') movie.credits = credits.value
     if (videos.status === 'fulfilled') movie.trailerKey = bestTrailerKey(videos.value)
     if (images.status === 'fulfilled') movie.logoPath = bestLogoPath(images.value.logos ?? [])
   } catch {
@@ -485,13 +483,11 @@ async function fetchShowMeta(show: TVShow, shows: Map<string, TVShow>): Promise<
     show.tmdbId = detail.id
     show.tmdbDetail = detail
 
-    const [credits, videos, images] = await Promise.allSettled([
-      tvCredits(detail.id),
+    const [videos, images] = await Promise.allSettled([
       tvVideos(detail.id),
       tvImages(detail.id),
     ])
 
-    if (credits.status === 'fulfilled') show.credits = credits.value
     if (videos.status === 'fulfilled') show.trailerKey = bestTrailerKey(videos.value)
     if (images.status === 'fulfilled') show.logoPath = bestLogoPath(images.value.logos ?? [])
 

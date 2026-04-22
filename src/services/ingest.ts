@@ -147,13 +147,11 @@ export async function ingestNewMovie(
         movie.tmdbId = detail.id
         movie.tmdbDetail = detail
 
-        const [credits, videos, images] = await Promise.allSettled([
-          movieCredits(detail.id),
+        const [videos, images] = await Promise.allSettled([
           movieVideos(detail.id),
           movieImages(detail.id),
         ])
 
-        if (credits.status === 'fulfilled') movie.credits = credits.value
         if (videos.status === 'fulfilled') movie.trailerKey = bestTrailerKey(videos.value)
         if (images.status === 'fulfilled') movie.logoPath = bestLogoPath(images.value.logos ?? [])
       }

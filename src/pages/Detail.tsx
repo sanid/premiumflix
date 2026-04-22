@@ -4,6 +4,8 @@ import { useLibrary } from '../contexts/LibraryContext'
 import { useCollection } from '../hooks/useCollection'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import { itemDetails } from '../services/premiumize'
+import { movieCredits, tvCredits } from '../services/tmdb'
+import { db } from '../db'
 import {
   movieDisplayTitle,
   showDisplayTitle,
@@ -27,6 +29,18 @@ export function MovieDetail() {
 
   const movie = movies.find((m) => m.id === id)
 
+  const [localCredits, setLocalCredits] = useState(movie?.credits)
+
+  useEffect(() => {
+    if (movie) setLocalCredits(movie.credits)
+    if (movie && !movie.credits && movie.tmdbId) {
+      movieCredits(movie.tmdbId).then((c) => {
+        setLocalCredits(c)
+        db.movies.update(movie.id, { credits: c })
+      }).catch(console.error)
+    }
+  }, [movie])
+
   if (!movie) {
     return (
       <div className="min-h-screen bg-premiumflix-dark flex items-center justify-center">
@@ -46,8 +60,8 @@ export function MovieDetail() {
   const genres = movie.tmdbDetail?.genres
   const overview = movie.tmdbDetail?.overview
   const tagline = movie.tmdbDetail?.tagline
-  const cast = movie.credits?.cast.slice(0, 12) ?? []
-  const director = movie.credits?.crew.find((c) => c.job === 'Director')
+  const cast = localCredits?.cast.slice(0, 12) ?? []
+  const director = localCredits?.crew.find((c) => c.job === 'Director')
   const mainFile = movieMainFile(movie)
   const fav = isFavorite(movie.id)
   const wl = isOnWatchlist(movie.id)
@@ -119,9 +133,17 @@ export function ShowDetail() {
 
   const show = tvShows.find((s) => s.id === id)
   const [selectedSeason, setSelectedSeason] = useState(0)
+  const [localCredits, setLocalCredits] = useState(show?.credits)
 
   useEffect(() => {
     if (show?.seasons.length) setSelectedSeason(0)
+    if (show) setLocalCredits(show.credits)
+    if (show && !show.credits && show.tmdbId) {
+      tvCredits(show.tmdbId).then((c) => {
+        setLocalCredits(c)
+        db.shows.update(show.id, { credits: c })
+      }).catch(console.error)
+    }
   }, [show])
 
   if (!show) {
@@ -142,7 +164,7 @@ export function ShowDetail() {
   const genres = show.tmdbDetail?.genres
   const overview = show.tmdbDetail?.overview
   const tagline = show.tmdbDetail?.tagline
-  const cast = show.credits?.cast.slice(0, 12) ?? []
+  const cast = localCredits?.cast.slice(0, 12) ?? []
   const fav = isFavorite(show.id)
   const wl = isOnWatchlist(show.id)
 
