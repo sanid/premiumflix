@@ -1,4 +1,5 @@
-import { Routes, Route } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Routes, Route, useLocation } from 'react-router-dom'
 import { Navbar } from './components/Navbar'
 import { Home } from './pages/Home'
 import { Movies } from './pages/Movies'
@@ -12,10 +13,21 @@ import { AddMovie } from './pages/AddMovie'
 import { LibraryProvider } from './contexts/LibraryContext'
 import { I18nProvider } from './contexts/I18nContext'
 
+function ScrollToTop() {
+  const { pathname } = useLocation()
+
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [pathname])
+
+  return null
+}
+
 export default function App() {
   return (
     <I18nProvider>
       <LibraryProvider>
+        <ScrollToTop />
       <Routes>
         {/* Full-screen player — no navbar */}
         <Route path="/play/:mode/:mediaId/:fileId" element={<Player />} />
