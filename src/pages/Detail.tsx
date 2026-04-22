@@ -141,7 +141,7 @@ export function ShowDetail() {
     if (show && !show.credits && show.tmdbId) {
       tvCredits(show.tmdbId).then((c) => {
         setLocalCredits(c)
-        db.shows.update(show.id, { credits: c })
+        db.tvShows.update(show.id, { credits: c })
       }).catch(console.error)
     }
   }, [show])
