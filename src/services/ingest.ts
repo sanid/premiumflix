@@ -6,7 +6,8 @@
  */
 
 import { listTransfers, listFolder } from './premiumize'
-import { searchMovieBest, movieCredits, movieVideos, movieImages, bestLogoPath, bestTrailerKey } from './tmdb'
+import { bestLogoPath, bestTrailerKey } from './tmdb'
+import { isTMDB, searchMovieBest, getVideos, getImages } from './metadata'
 import { appendMovie } from '../db'
 import type { Movie, MediaFile, PMItem } from '../types'
 
@@ -144,12 +145,13 @@ export async function ingestNewMovie(
     try {
       const detail = await searchMovieBest(movieTitle, String(movieYear))
       if (detail) {
-        movie.tmdbId = detail.id
+        movie.tmdbId = isTMDB() ? detail.id : undefined
+        movie.imdbId = detail.imdb_id
         movie.tmdbDetail = detail
 
         const [videos, images] = await Promise.allSettled([
-          movieVideos(detail.id),
-          movieImages(detail.id),
+          getVideos(detail, 'movie'),
+          getImages(detail, 'movie'),
         ])
 
         if (videos.status === 'fulfilled') movie.trailerKey = bestTrailerKey(videos.value)

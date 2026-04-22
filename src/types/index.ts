@@ -219,6 +219,7 @@ export interface Movie {
   year?: string
   files: MediaFile[]
   tmdbId?: number
+  imdbId?: string
   tmdbDetail?: TMDBMovieDetail
   credits?: TMDBCredits
   trailerKey?: string
@@ -232,6 +233,7 @@ export interface TVShow {
   year?: string
   seasons: Season[]
   tmdbId?: number
+  imdbId?: string
   tmdbDetail?: TMDBMovieDetail
   credits?: TMDBCredits
   trailerKey?: string
@@ -290,17 +292,26 @@ export function showDisplayTitle(s: TVShow): string {
 
 export function posterUrl(path?: string | null): string | undefined {
   if (!path) return undefined
+  if (path.startsWith('http')) return path
   return `https://image.tmdb.org/t/p/w500${path}`
 }
 
 export function backdropUrl(path?: string | null): string | undefined {
   if (!path) return undefined
+  if (path.startsWith('http')) return path
   return `https://image.tmdb.org/t/p/w1280${path}`
 }
 
 export function profileUrl(path?: string | null): string | undefined {
   if (!path) return undefined
+  if (path.startsWith('http')) return path
   return `https://image.tmdb.org/t/p/w185${path}`
+}
+
+export function stillUrl(path?: string | null): string | undefined {
+  if (!path) return undefined
+  if (path.startsWith('http')) return path
+  return `https://image.tmdb.org/t/p/w300${path}`
 }
 
 export function moviePosterUrl(m: Movie): string | undefined {

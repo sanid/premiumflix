@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
 import { accountInfo } from '../services/premiumize'
 import { listFolder } from '../services/premiumize'
+import { isTMDB } from '../services/metadata'
 import type { ScanFolderSelection, PMItem } from '../types'
 import { useI18n } from '../contexts/I18nContext'
 
@@ -36,7 +37,7 @@ export function Settings() {
       .catch((e) => setAccountError(e.message))
   }, [])
 
-  const languageChanged = language !== savedLang
+  const languageChanged = isTMDB() && language !== savedLang
 
   function saveSettings() {
     localStorage.setItem('pm_api_key', pmKey.trim())
@@ -117,6 +118,32 @@ export function Settings() {
           )}
         </Section>
 
+        {/* Metadata Source */}
+        <Section title="Metadata Source">
+          <div className={`flex items-center gap-3 rounded-md px-4 py-3 mb-4 ${
+            isTMDB()
+              ? 'bg-blue-500/10 border border-blue-500/30'
+              : 'bg-green-500/10 border border-green-500/30'
+          }`}>
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isTMDB() ? 'bg-blue-400' : 'bg-green-400'}`} />
+            <div>
+              <p className={`text-sm font-medium ${isTMDB() ? 'text-blue-300' : 'text-green-300'}`}>
+                {isTMDB() ? 'TMDB (The Movie Database)' : 'IMDb via imdbapi.dev'}
+              </p>
+              <p className="text-premiumflix-muted/70 text-xs mt-0.5">
+                {isTMDB()
+                  ? 'Using TMDB — trailers, taglines, and localized metadata available'
+                  : 'Free, no API key required — trailers and taglines not available'}
+              </p>
+            </div>
+          </div>
+          <p className="text-premiumflix-muted/60 text-xs leading-relaxed">
+            imdbapi.dev is used by default and requires no setup. Add a TMDB key below to unlock
+            YouTube trailers, movie taglines, localized metadata, and better logo images.
+            A rescan is required after changing the source.
+          </p>
+        </Section>
+
         {/* API Keys */}
         <Section title={t.settings.apiKeys}>
           <div className="space-y-4">
@@ -134,27 +161,64 @@ export function Settings() {
               </p>
             </div>
             <div>
-              <label className="text-premiumflix-muted text-sm block mb-1">{t.settings.tmdbApiKey}</label>
-              <input
-                type="text"
-                value={tmdbKey}
-                onChange={(e) => setTmdbKey(e.target.value)}
-                className="w-full bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none focus:border-white/40"
-                placeholder="Your TMDB API key"
-              />
-              <p className="text-premiumflix-muted/60 text-xs mt-1">
-                Get a free key at themoviedb.org
-              </p>
+              <label className="text-premiumflix-muted text-sm block mb-1">
+                {t.settings.tmdbApiKey}
+                {import.meta.env.VITE_TMDB_USE_PROXY === 'true' ? (
+                  <span className="ml-2 text-xs font-normal bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">
+                    configured via server
+                  </span>
+                ) : (
+                  <span className="ml-2 text-xs font-normal bg-white/10 text-premiumflix-muted px-1.5 py-0.5 rounded">
+                    optional
+                  </span>
+                )}
+              </label>
+              {import.meta.env.VITE_TMDB_USE_PROXY === 'true' ? (
+                <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 rounded-md px-3 py-2.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+                  <p className="text-green-300 text-xs">
+                    TMDB key is set as a Vercel environment variable and is not exposed to the browser.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={tmdbKey}
+                    onChange={(e) => setTmdbKey(e.target.value)}
+                    className="w-full bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none focus:border-white/40"
+                    placeholder="Leave empty to use imdbapi.dev (free, no key needed)"
+                  />
+                  <p className="text-premiumflix-muted/60 text-xs mt-1">
+                    Get a free key at themoviedb.org — enables trailers, taglines &amp; localized metadata
+                  </p>
+                  {tmdbKey.trim() && (
+                    <div className="mt-2 flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+                      <span className="text-amber-400 text-xs">⚠</span>
+                      <p className="text-amber-300 text-xs">Save and rescan your library to apply the new metadata source.</p>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </Section>
 
         {/* Language */}
         <Section title={t.settings.metadataLang}>
+          {!isTMDB() && (
+            <div className="mb-3 flex items-start gap-2 bg-premiumflix-surface border border-white/10 rounded-md px-3 py-2.5">
+              <span className="text-premiumflix-muted/60 text-xs mt-0.5">ℹ</span>
+              <p className="text-premiumflix-muted/70 text-xs leading-relaxed">
+                Language selection only applies when a TMDB key is set. imdbapi.dev provides English metadata only.
+              </p>
+            </div>
+          )}
           <select
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
-            className="bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none cursor-pointer w-full"
+            disabled={!isTMDB()}
+            className="bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none cursor-pointer w-full disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <option value="en-US">English (US)</option>
             <option value="de-DE">German (DE)</option>
@@ -171,10 +235,12 @@ export function Settings() {
             <option value="pl-PL">Polish (PL)</option>
             <option value="tr-TR">Turkish (TR)</option>
           </select>
-          <p className="text-premiumflix-muted/60 text-xs mt-2">
-            Controls the language used for titles, overviews, and metadata fetched from TMDB.
-          </p>
-          {languageChanged && (
+          {isTMDB() && (
+            <p className="text-premiumflix-muted/60 text-xs mt-2">
+              Controls the language used for titles, overviews, and metadata fetched from TMDB.
+            </p>
+          )}
+          {languageChanged && isTMDB() && (
             <div className="mt-3 flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2.5">
               <span className="text-amber-400 mt-0.5">⚠</span>
               <p className="text-amber-300 text-xs leading-relaxed">
@@ -315,9 +381,10 @@ export function Settings() {
         {/* Note about CORS */}
         <Section title="Network Note">
           <p className="text-premiumflix-muted text-xs leading-relaxed">
-            In development mode, Premiumize API calls are proxied via Vite's dev server to avoid CORS issues.
-            In production, requests go directly to Premiumize (which supports CORS for API key auth).
-            If you encounter issues, the TMDB API always works from the browser.
+            Premiumize and imdbapi.dev are both proxied through Vite to work around browser CORS restrictions.
+            This means the app must be served via <code className="bg-white/10 px-1 rounded">npm run dev</code> or{' '}
+            <code className="bg-white/10 px-1 rounded">npm run preview</code>.
+            If you deploy to a static host, use a TMDB key instead — TMDB supports CORS natively.
           </p>
         </Section>
       </div>

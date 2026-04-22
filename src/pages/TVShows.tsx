@@ -132,8 +132,8 @@ export function TVShows() {
         </div>
       ) : (
         <div
-          className="px-4 sm:px-8 lg:px-12 grid gap-3"
-          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}
+          className="px-4 sm:px-8 lg:px-12 grid gap-4 sm:gap-5"
+          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}
         >
           {filtered.map((show) => (
             <ShowCard key={show.id} show={show} />

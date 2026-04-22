@@ -4,7 +4,7 @@ import { useLibrary } from '../contexts/LibraryContext'
 import { useCollection } from '../hooks/useCollection'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import { itemDetails } from '../services/premiumize'
-import { movieCredits, tvCredits } from '../services/tmdb'
+import { getCredits } from '../services/metadata'
 import { db } from '../db'
 import {
   movieDisplayTitle,
@@ -12,6 +12,7 @@ import {
   backdropUrl,
   posterUrl,
   profileUrl,
+  stillUrl,
   formatRuntime,
   movieMainFile,
   formatFileSize,
@@ -33,8 +34,8 @@ export function MovieDetail() {
 
   useEffect(() => {
     if (movie) setLocalCredits(movie.credits)
-    if (movie && !movie.credits && movie.tmdbId) {
-      movieCredits(movie.tmdbId).then((c) => {
+    if (movie && !movie.credits && movie.tmdbDetail) {
+      getCredits(movie.tmdbDetail, 'movie').then((c) => {
         setLocalCredits(c)
         db.movies.update(movie.id, { credits: c })
       }).catch(console.error)
@@ -138,8 +139,8 @@ export function ShowDetail() {
   useEffect(() => {
     if (show?.seasons.length) setSelectedSeason(0)
     if (show) setLocalCredits(show.credits)
-    if (show && !show.credits && show.tmdbId) {
-      tvCredits(show.tmdbId).then((c) => {
+    if (show && !show.credits && show.tmdbDetail) {
+      getCredits(show.tmdbDetail, 'tv').then((c) => {
         setLocalCredits(c)
         db.tvShows.update(show.id, { credits: c })
       }).catch(console.error)
@@ -225,9 +226,7 @@ export function ShowDetail() {
                 .map((ep) => {
                   const fraction = getProgressFraction(ep.file.id)
                   const tmdbEp = ep.tmdbEpisode
-                  const still = tmdbEp?.still_path
-                    ? `https://image.tmdb.org/t/p/w300${tmdbEp.still_path}`
-                    : undefined
+                  const still = stillUrl(tmdbEp?.still_path)
 
                   return (
                     <div

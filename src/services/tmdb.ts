@@ -9,9 +9,13 @@ import type {
   TMDBImageInfo,
 } from '../types'
 
-const BASE_URL = 'https://api.themoviedb.org/3'
+// When VITE_TMDB_USE_PROXY=true, requests go through api/tmdb/[...path].ts (Vercel Edge Function)
+// and the key stays on the server. Otherwise the key comes from localStorage / VITE_TMDB_API_KEY.
+const USE_PROXY = import.meta.env.VITE_TMDB_USE_PROXY === 'true'
+const BASE_URL = USE_PROXY ? '/api/tmdb' : 'https://api.themoviedb.org/3'
 
 function getApiKey(): string {
+  if (USE_PROXY) return '' // key is added server-side
   return localStorage.getItem('tmdb_api_key') || import.meta.env.VITE_TMDB_API_KEY || ''
 }
 
@@ -20,8 +24,8 @@ function getLang(): string {
 }
 
 async function tmdbFetch<T>(path: string, params: Record<string, string> = {}, retries = 3): Promise<T> {
-  const url = new URL(`${BASE_URL}/${path}`)
-  url.searchParams.set('api_key', getApiKey())
+  const url = new URL(`${BASE_URL}/${path}`, window.location.origin)
+  if (!USE_PROXY) url.searchParams.set('api_key', getApiKey())
   url.searchParams.set('language', getLang())
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v)

@@ -5,21 +5,15 @@
  */
 import type { Movie, TVShow, Season, Episode, MediaFile, PMItem, ScanFolderSelection } from '../types'
 import { listFolder } from './premiumize'
+import { bestLogoPath, bestTrailerKey, movieDetail as tmdbMovieDetail, tvDetail as tmdbTVDetail } from './tmdb'
 import {
+  isTMDB,
   searchMovieBest,
   searchTVBest,
-  movieCredits,
-  tvCredits,
-  movieVideos,
-  tvVideos,
-  movieImages,
-  tvImages,
-  seasonDetail as fetchSeasonDetail,
-  bestLogoPath,
-  bestTrailerKey,
-  movieDetail,
-  tvDetail,
-} from './tmdb'
+  getVideos,
+  getImages,
+  getSeasonDetail as metaSeasonDetail,
+} from './metadata'
 
 // ─── Filename / folder parsing ────────────────────────────────────────────────
 
@@ -435,7 +429,7 @@ async function fetchAllMetadata(
     await Promise.all(batch.map((m) => fetchMovieMeta(m)))
     progress.metadataFetched += batch.length
     tick()
-    await new Promise(r => setTimeout(r, 500)) // Throttle to prevent TMDB 429
+    await new Promise(r => setTimeout(r, 400)) // Throttle to avoid API rate limits
   }
 
   for (let i = 0; i < showList.length; i += CONCURRENCY) {
@@ -443,26 +437,27 @@ async function fetchAllMetadata(
     await Promise.all(batch.map((s) => fetchShowMeta(s, shows)))
     progress.metadataFetched += batch.length
     tick()
-    await new Promise(r => setTimeout(r, 500)) // Throttle to prevent TMDB 429
+    await new Promise(r => setTimeout(r, 400)) // Throttle to avoid API rate limits
   }
 }
 
 async function fetchMovieMeta(movie: Movie): Promise<void> {
   try {
     let detail = null
-    if (movie.tmdbId) {
-      detail = await movieDetail(movie.tmdbId)
+    if (isTMDB() && movie.tmdbId) {
+      detail = await tmdbMovieDetail(movie.tmdbId)
     } else {
       detail = await searchMovieBest(movie.title, movie.year)
     }
     if (!detail) return
 
-    movie.tmdbId = detail.id
+    movie.tmdbId = isTMDB() ? detail.id : undefined
+    movie.imdbId = detail.imdb_id
     movie.tmdbDetail = detail
 
     const [videos, images] = await Promise.allSettled([
-      movieVideos(detail.id),
-      movieImages(detail.id),
+      getVideos(detail, 'movie'),
+      getImages(detail, 'movie'),
     ])
 
     if (videos.status === 'fulfilled') movie.trailerKey = bestTrailerKey(videos.value)
@@ -475,19 +470,20 @@ async function fetchMovieMeta(movie: Movie): Promise<void> {
 async function fetchShowMeta(show: TVShow, shows: Map<string, TVShow>): Promise<void> {
   try {
     let detail = null
-    if (show.tmdbId) {
-      detail = await tvDetail(show.tmdbId)
+    if (isTMDB() && show.tmdbId) {
+      detail = await tmdbTVDetail(show.tmdbId)
     } else {
       detail = await searchTVBest(show.title, show.year)
     }
     if (!detail) return
 
-    show.tmdbId = detail.id
+    show.tmdbId = isTMDB() ? detail.id : undefined
+    show.imdbId = detail.imdb_id
     show.tmdbDetail = detail
 
     const [videos, images] = await Promise.allSettled([
-      tvVideos(detail.id),
-      tvImages(detail.id),
+      getVideos(detail, 'tv'),
+      getImages(detail, 'tv'),
     ])
 
     if (videos.status === 'fulfilled') show.trailerKey = bestTrailerKey(videos.value)
@@ -500,7 +496,7 @@ async function fetchShowMeta(show: TVShow, shows: Map<string, TVShow>): Promise<
         if (sIdx < 0) continue
         show.seasons[sIdx].tmdbSeason = tmdbSeason
         try {
-          const sd = await fetchSeasonDetail(detail.id, tmdbSeason.season_number)
+          const sd = await metaSeasonDetail(detail, tmdbSeason.season_number)
           if (sd.episodes) {
             for (const ep of sd.episodes) {
               const eIdx = show.seasons[sIdx].episodes.findIndex((e) => e.number === ep.episode_number)
