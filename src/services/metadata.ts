@@ -1,6 +1,6 @@
 /**
- * Metadata facade — routes requests to TMDB (default, using VITE_TMDB_API_KEY
- * or a user-supplied key) or imdbapi.dev as a fallback when no key is available.
+ * Metadata facade — routes requests to TMDB (when the Vercel proxy is active or
+ * the user has set their own key in Settings) or imdbapi.dev as a fallback.
  *
  * Features only available with TMDB:
  *  - YouTube trailer keys
@@ -15,12 +15,10 @@ import * as tmdb from './tmdb'
 import * as imdb from './imdb'
 
 export function isTMDB(): boolean {
-  // Server-side proxy active (Vercel deployment with TMDB_API_KEY set)
+  // Server-side proxy active (Vercel deployment with TMDB_API_KEY set server-side)
   if (import.meta.env.VITE_TMDB_USE_PROXY === 'true') return true
-  // Client-side key set in Settings
-  if (localStorage.getItem('tmdb_api_key')?.trim()) return true
-  // Build-time default key (VITE_TMDB_API_KEY in .env)
-  return !!(import.meta.env.VITE_TMDB_API_KEY?.trim())
+  // User's own key set in Settings
+  return !!(localStorage.getItem('tmdb_api_key')?.trim())
 }
 
 // ─── Search ────────────────────────────────────────────────────────────────────

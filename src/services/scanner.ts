@@ -3,7 +3,7 @@
  * Traverses Premiumize folder hierarchy, classifies items as movies or TV shows,
  * and enriches them with TMDB metadata.
  */
-import type { Movie, TVShow, Season, Episode, MediaFile, PMItem, ScanFolderSelection } from '../types'
+import type { Movie, TVShow, Season, Episode, MediaFile, SubtitleTrack, PMItem, ScanFolderSelection } from '../types'
 import { listFolder } from './premiumize'
 import { bestLogoPath, bestTrailerKey, movieDetail as tmdbMovieDetail, tvDetail as tmdbTVDetail } from './tmdb'
 import {
@@ -18,6 +18,7 @@ import {
 // ─── Filename / folder parsing ────────────────────────────────────────────────
 
 const VIDEO_EXTS = ['mkv', 'mp4', 'avi', 'm4v', 'mov', 'wmv', 'ts', 'flv', 'webm', 'mpg', 'mpeg']
+const SUBTITLE_EXTS = new Set(['srt', 'vtt', 'ass', 'ssa', 'sub'])
 const NOISE_TAGS = [
   '1080p', '1080i', '720p', '2160p', '4k', 'uhd', 'bluray', 'bdrip', 'brrip',
   'web-dl', 'webdl', 'webrip', 'hdtv', 'hdrip', 'dvdrip', 'x264', 'x265', 'hevc',
@@ -32,6 +33,70 @@ function isVideo(item: PMItem): boolean {
   if (item.mime_type?.startsWith('video/')) return true
   const ext = item.name.split('.').pop()?.toLowerCase() ?? ''
   return VIDEO_EXTS.includes(ext)
+}
+
+function isSubtitle(item: PMItem): boolean {
+  const ext = item.name.split('.').pop()?.toLowerCase() ?? ''
+  return SUBTITLE_EXTS.has(ext)
+}
+
+const LANG_NAMES: Record<string, string> = {
+  en: 'English', eng: 'English', english: 'English',
+  fr: 'French', fra: 'French', fre: 'French', french: 'French',
+  de: 'German', deu: 'German', ger: 'German', german: 'German',
+  es: 'Spanish', spa: 'Spanish', spanish: 'Spanish',
+  it: 'Italian', ita: 'Italian', italian: 'Italian',
+  pt: 'Portuguese', por: 'Portuguese', portuguese: 'Portuguese',
+  nl: 'Dutch', nld: 'Dutch', dutch: 'Dutch',
+  ru: 'Russian', rus: 'Russian', russian: 'Russian',
+  ja: 'Japanese', jpn: 'Japanese', japanese: 'Japanese',
+  ko: 'Korean', kor: 'Korean', korean: 'Korean',
+  zh: 'Chinese', zho: 'Chinese', chi: 'Chinese', chinese: 'Chinese',
+  ar: 'Arabic', ara: 'Arabic', arabic: 'Arabic',
+  hi: 'Hindi', hin: 'Hindi', hindi: 'Hindi',
+  tr: 'Turkish', tur: 'Turkish', turkish: 'Turkish',
+  pl: 'Polish', pol: 'Polish', polish: 'Polish',
+  sv: 'Swedish', swe: 'Swedish', swedish: 'Swedish',
+  no: 'Norwegian', nor: 'Norwegian', norwegian: 'Norwegian',
+  da: 'Danish', dan: 'Danish', danish: 'Danish',
+  fi: 'Finnish', fin: 'Finnish', finnish: 'Finnish',
+}
+
+function parseSubtitleLabel(fileName: string): { label: string; language: string } {
+  const base = fileName.replace(/\.[^.]+$/, '').toLowerCase()
+  const parts = base.split(/[._\-\s]+/)
+  // Scan last few parts for a known language code
+  for (let i = parts.length - 1; i >= Math.max(0, parts.length - 3); i--) {
+    const langName = LANG_NAMES[parts[i]]
+    if (langName) return { label: langName, language: parts[i].slice(0, 2) }
+  }
+  return { label: 'Subtitles', language: 'unknown' }
+}
+
+function attachSubtitles(mediaFiles: MediaFile[], subtitleItems: PMItem[]): void {
+  if (!subtitleItems.length || !mediaFiles.length) return
+  const tracks = subtitleItems.flatMap((s): SubtitleTrack[] => {
+    if (!s.link) return []
+    const { label, language } = parseSubtitleLabel(s.name)
+    return [{ id: s.id, label, language, fileName: s.name, directLink: s.link }]
+  })
+  if (!tracks.length) return
+
+  if (mediaFiles.length === 1) {
+    mediaFiles[0].subtitles = tracks
+    return
+  }
+
+  // Multiple videos — match each subtitle to its video by base filename
+  for (const video of mediaFiles) {
+    const videoBase = video.fileName.replace(/\.[^.]+$/, '').toLowerCase()
+    const matched = tracks.filter((t) => {
+      const subBase = t.fileName.replace(/\.[^.]+$/, '').toLowerCase()
+      const subCore = subBase.replace(/\.[a-z]{2,3}$/, '') // strip potential lang suffix
+      return subCore === videoBase || subBase === videoBase || subBase.startsWith(videoBase + '.')
+    })
+    if (matched.length > 0) video.subtitles = matched
+  }
 }
 
 function extractYear(text: string): string | undefined {
@@ -257,6 +322,7 @@ async function processFolder(
     const contents = folderData.content ?? []
     const videoFiles = contents.filter(isVideo)
     const subFolders = contents.filter((c) => c.type === 'folder')
+    const subtitleItems = contents.filter(isSubtitle)
 
     const hasSeasonFolders = subFolders.some((s) => parseSeasonFromFolderName(s.name) !== undefined)
     const hasEpisodes = videoFiles.some((f) => parseSeasonEpisode(f.name).type === 'tvshow')
@@ -298,12 +364,17 @@ async function processFolder(
       }
 
       // Loose episode files in show root
+      const looseEpFiles: Array<{ mediaFile: MediaFile; pmFile: PMItem; s: number; e: number }> = []
       let autoEp = 1
       for (const file of videoFiles) {
         const parsed = parseSeasonEpisode(file.name)
         const s = parsed.season ?? 1
         const e = parsed.episode ?? autoEp++
-        addEpisodeToShow(showKey, s, e, makeMediaFile(file, s, e), file.name, shows)
+        looseEpFiles.push({ mediaFile: makeMediaFile(file, s, e), pmFile: file, s, e })
+      }
+      attachSubtitles(looseEpFiles.map((f) => f.mediaFile), subtitleItems)
+      for (const { mediaFile, pmFile, s, e } of looseEpFiles) {
+        addEpisodeToShow(showKey, s, e, mediaFile, pmFile.name, shows)
       }
 
       // Non-season subfolders
@@ -316,6 +387,7 @@ async function processFolder(
       // Movie
       const parsed = parseFilename(item.name)
       const files = videoFiles.map((f) => makeMediaFile(f))
+      attachSubtitles(files, subtitleItems)
 
       let title = parsed.title || cleanFolderTitle(item.name)
       let tmdbId: number | undefined
@@ -365,15 +437,21 @@ async function processSeasonFolder(
     const items = data.content ?? []
     const videoFiles = items.filter(isVideo)
     const subFolders = items.filter((i) => i.type === 'folder')
+    const subtitleItems = items.filter(isSubtitle)
 
     const show = shows.get(showKey)
     const existingEps = show?.seasons.find((s) => s.number === seasonNumber)?.episodes.length ?? 0
     let autoEp = existingEps + 1
 
+    const seasonFiles: Array<{ mediaFile: MediaFile; pmFile: PMItem; episode: number }> = []
     for (const file of videoFiles) {
       const parsed = parseSeasonEpisode(file.name)
       const e = parsed.episode ?? autoEp++
-      addEpisodeToShow(showKey, seasonNumber, e, makeMediaFile(file, seasonNumber, e), file.name, shows)
+      seasonFiles.push({ mediaFile: makeMediaFile(file, seasonNumber, e), pmFile: file, episode: e })
+    }
+    attachSubtitles(seasonFiles.map((f) => f.mediaFile), subtitleItems)
+    for (const { mediaFile, pmFile, episode } of seasonFiles) {
+      addEpisodeToShow(showKey, seasonNumber, episode, mediaFile, pmFile.name, shows)
     }
 
     for (const sub of subFolders) {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import Hls from 'hls.js'
+import type { SubtitleTrack } from '../types'
 
 interface VideoPlayerProps {
   src: string
@@ -7,6 +8,7 @@ interface VideoPlayerProps {
   fallbackSrc?: Promise<string | null> | string | null
   title: string
   subtitle?: string
+  subtitles?: SubtitleTrack[]
   initialPosition?: number
   onProgress?: (position: number, duration: number) => void
   onBack?: () => void
@@ -18,6 +20,7 @@ export function VideoPlayer({
   fallbackSrc,
   title,
   subtitle,
+  subtitles,
   initialPosition = 0,
   onProgress,
   onBack,
@@ -49,6 +52,15 @@ export function VideoPlayer({
   const [audioTracks, setAudioTracks] = useState<{ id: number; name: string; lang: string }[]>([])
   const [activeAudioTrack, setActiveAudioTrack] = useState<number>(-1)
   const [showLangMenu, setShowLangMenu] = useState(false)
+
+  // ─── Subtitles ────────────────────────────────────────────────────────────
+  // External subtitle files (from props)
+  const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null)
+  // HLS embedded subtitle tracks (from MKV transcoded stream)
+  const [hlsSubTracks, setHlsSubTracks] = useState<{ id: number; name: string; lang: string }[]>([])
+  const [activeHlsSub, setActiveHlsSub] = useState<number>(-1)
+  const [showSubMenu, setShowSubMenu] = useState(false)
+  const subtitleBlobRef = useRef<string | null>(null)
 
   // ─── AirPlay ──────────────────────────────────────────────────────────────
   const [airPlayAvailable, setAirPlayAvailable] = useState(false)
@@ -166,6 +178,8 @@ export function VideoPlayer({
   useEffect(() => {
     setActiveSrc(src)
     triedFallback.current = false
+    setActiveSubtitle(null)
+    setShowSubMenu(false)
   }, [src])
 
   // ─── HLS / native setup ───────────────────────────────────────────────────
@@ -220,6 +234,19 @@ export function VideoPlayer({
       hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => {
         setActiveAudioTrack(hls.audioTrack)
       })
+      // Embedded subtitle tracks (e.g. from transcoded MKV)
+      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+        const tracks = hls.subtitleTracks.map((t, i) => ({
+          id: i,
+          name: t.name ?? t.lang ?? `Track ${i + 1}`,
+          lang: t.lang ?? '',
+        }))
+        setHlsSubTracks(tracks)
+        setActiveHlsSub(hls.subtitleTrack)
+      })
+      hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, () => {
+        setActiveHlsSub(hls.subtitleTrack)
+      })
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // Safari native HLS
       video.src = activeSrc
@@ -237,8 +264,68 @@ export function VideoPlayer({
       setAudioTracks([])
       setActiveAudioTrack(-1)
       setShowLangMenu(false)
+      setHlsSubTracks([])
+      setActiveHlsSub(-1)
     }
   }, [activeSrc])
+
+  // ─── Subtitle track loading ───────────────────────────────────────────────
+
+  useEffect(() => {
+    const video = videoRef.current
+
+    // Remove previous subtitle track and revoke blob
+    video?.querySelectorAll('track.subtitle-track').forEach((t) => t.remove())
+    if (subtitleBlobRef.current) {
+      URL.revokeObjectURL(subtitleBlobRef.current)
+      subtitleBlobRef.current = null
+    }
+
+    if (!activeSubtitle || !subtitles?.length || !video) return
+
+    const track = subtitles.find((s) => s.id === activeSubtitle)
+    if (!track?.directLink) return
+
+    let cancelled = false
+
+    fetch(track.directLink)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.text()
+      })
+      .then((text) => {
+        if (cancelled) return
+        const isVtt = track.fileName.toLowerCase().endsWith('.vtt')
+        const vtt = isVtt ? text : srtToVtt(text)
+        const blob = new Blob([vtt], { type: 'text/vtt' })
+        const url = URL.createObjectURL(blob)
+        subtitleBlobRef.current = url
+
+        const el = document.createElement('track')
+        el.className = 'subtitle-track'
+        el.kind = 'subtitles'
+        el.label = track.label
+        el.srclang = track.language !== 'unknown' ? track.language : ''
+        el.src = url
+        video.appendChild(el)
+
+        el.addEventListener('load', () => {
+          for (let i = 0; i < video.textTracks.length; i++) {
+            video.textTracks[i].mode = video.textTracks[i].label === track.label ? 'showing' : 'disabled'
+          }
+        }, { once: true })
+      })
+      .catch(() => {})
+
+    return () => { cancelled = true }
+  }, [activeSubtitle, subtitles])
+
+  // Cleanup subtitle blob on unmount
+  useEffect(() => {
+    return () => {
+      if (subtitleBlobRef.current) URL.revokeObjectURL(subtitleBlobRef.current)
+    }
+  }, [])
 
   // ─── Event listeners ──────────────────────────────────────────────────────
 
@@ -592,6 +679,74 @@ export function VideoPlayer({
             </span>
 
             <div className="ml-auto flex items-center gap-2">
+              {/* Subtitles — shown when HLS embedded tracks or external files are available */}
+              {(hlsSubTracks.length > 0 || (subtitles && subtitles.length > 0)) && (
+                <div className="relative">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowSubMenu((v) => !v); setShowLangMenu(false) }}
+                    className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors ${
+                      activeSubtitle || activeHlsSub >= 0
+                        ? 'text-white border-white/60 bg-white/10'
+                        : 'text-white/60 hover:text-white border-white/30 hover:border-white/60'
+                    }`}
+                    title="Subtitles"
+                  >
+                    <CCIcon className="w-4 h-4" />
+                  </button>
+                  {showSubMenu && (
+                    <div
+                      className="absolute bottom-full mb-2 right-0 bg-black/90 border border-white/20 rounded-lg overflow-hidden min-w-[130px] shadow-xl"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => {
+                          setActiveSubtitle(null)
+                          if (hlsRef.current) hlsRef.current.subtitleTrack = -1
+                          setShowSubMenu(false)
+                        }}
+                        className={`w-full text-left px-4 py-2 text-sm transition-colors ${
+                          !activeSubtitle && activeHlsSub < 0 ? 'bg-red-600 text-white' : 'text-white/80 hover:bg-white/10'
+                        }`}
+                      >
+                        Off
+                      </button>
+                      {/* HLS embedded tracks */}
+                      {hlsSubTracks.map((track) => (
+                        <button
+                          key={`hls-${track.id}`}
+                          onClick={() => {
+                            setActiveSubtitle(null) // disable external
+                            if (hlsRef.current) hlsRef.current.subtitleTrack = track.id
+                            setShowSubMenu(false)
+                          }}
+                          className={`w-full text-left px-4 py-2 text-sm transition-colors ${
+                            track.id === activeHlsSub ? 'bg-red-600 text-white' : 'text-white/80 hover:bg-white/10'
+                          }`}
+                        >
+                          {track.name || track.lang || `Track ${track.id + 1}`}
+                        </button>
+                      ))}
+                      {/* External subtitle files */}
+                      {subtitles?.map((track) => (
+                        <button
+                          key={track.id}
+                          onClick={() => {
+                            if (hlsRef.current) hlsRef.current.subtitleTrack = -1 // disable HLS
+                            setActiveSubtitle(track.id)
+                            setShowSubMenu(false)
+                          }}
+                          className={`w-full text-left px-4 py-2 text-sm transition-colors ${
+                            track.id === activeSubtitle ? 'bg-red-600 text-white' : 'text-white/80 hover:bg-white/10'
+                          }`}
+                        >
+                          {track.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Audio / Language switcher */}
               {audioTracks.length > 1 && (
                 <div className="relative">
@@ -668,6 +823,23 @@ export function VideoPlayer({
       </div>
     </div>
   )
+}
+
+// ─── SRT → WebVTT converter ───────────────────────────────────────────────────
+
+function srtToVtt(srt: string): string {
+  const normalized = srt.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const blocks = normalized.split(/\n\n+/)
+  const converted = blocks.map((block) => {
+    const lines = block.split('\n')
+    // Drop leading sequence number line
+    const start = lines[0]?.match(/^\d+$/) ? 1 : 0
+    return lines
+      .slice(start)
+      .join('\n')
+      .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2') // SRT comma → VTT dot
+  })
+  return 'WEBVTT\n\n' + converted.join('\n\n')
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -748,6 +920,14 @@ function AirPlayIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
       <path d="M6 22h12l-6-6-6 6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" />
+    </svg>
+  )
+}
+
+function CCIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z" />
     </svg>
   )
 }

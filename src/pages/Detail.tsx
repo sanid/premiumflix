@@ -335,6 +335,7 @@ function DetailShell({
 }: DetailShellProps) {
   const navigate = useNavigate()
   const { t } = useI18n()
+  const [trailerOpen, setTrailerOpen] = useState(false)
 
   return (
     <div className="min-h-screen bg-premiumflix-dark">
@@ -434,17 +435,41 @@ function DetailShell({
               </button>
 
               {trailerKey && (
-                <a
-                  href={`https://www.youtube.com/watch?v=${trailerKey}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={() => setTrailerOpen(true)}
                   className="flex items-center gap-2 bg-premiumflix-surface border border-white/20 text-white font-bold px-5 py-2.5 rounded hover:bg-premiumflix-card transition-colors"
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M10 16.5l6-4.5-6-4.5v9zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" />
                   </svg>
                   {t.detail.trailer}
-                </a>
+                </button>
+              )}
+
+              {/* Trailer modal */}
+              {trailerOpen && trailerKey && (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+                  onClick={() => setTrailerOpen(false)}
+                >
+                  <div
+                    className="relative w-full max-w-3xl aspect-video"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => setTrailerOpen(false)}
+                      className="absolute -top-9 right-0 text-white/70 hover:text-white text-sm font-medium"
+                    >
+                      ✕ Close
+                    </button>
+                    <iframe
+                      src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}
+                      allow="autoplay; encrypted-media; fullscreen"
+                      allowFullScreen
+                      className="w-full h-full rounded-lg"
+                    />
+                  </div>
+                </div>
               )}
             </div>
 

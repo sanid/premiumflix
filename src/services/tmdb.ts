@@ -10,13 +10,13 @@ import type {
 } from '../types'
 
 // When VITE_TMDB_USE_PROXY=true, requests go through api/tmdb/[...path].ts (Vercel Edge Function)
-// and the key stays on the server. Otherwise the key comes from localStorage / VITE_TMDB_API_KEY.
+// and the key stays on the server. Otherwise the user must supply their own key in Settings.
 const USE_PROXY = import.meta.env.VITE_TMDB_USE_PROXY === 'true'
 const BASE_URL = USE_PROXY ? '/api/tmdb' : 'https://api.themoviedb.org/3'
 
 function getApiKey(): string {
   if (USE_PROXY) return '' // key is added server-side
-  return localStorage.getItem('tmdb_api_key') || import.meta.env.VITE_TMDB_API_KEY || ''
+  return localStorage.getItem('tmdb_api_key') ?? ''
 }
 
 function getLang(): string {

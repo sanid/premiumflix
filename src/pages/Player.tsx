@@ -162,6 +162,7 @@ export function Player() {
         fallbackSrc={fallbackSrc}
         title={title}
         subtitle={subtitle}
+        subtitles={file?.subtitles}
         initialPosition={initialPosition}
         onProgress={handleProgress}
         onBack={handleBack}

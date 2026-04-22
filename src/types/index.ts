@@ -196,6 +196,14 @@ export interface TMDBImagesResponse {
 
 // ─── Media Domain Types ───────────────────────────────────────────────────────
 
+export interface SubtitleTrack {
+  id: string
+  label: string       // e.g. "English", "French"
+  language: string    // ISO 639-1 or "unknown"
+  fileName: string
+  directLink: string
+}
+
 export interface MediaFile {
   id: string
   name: string
@@ -211,6 +219,7 @@ export interface MediaFile {
   premiumizeId: string
   episodeNumber?: number
   seasonNumber?: number
+  subtitles?: SubtitleTrack[]
 }
 
 export interface Movie {
