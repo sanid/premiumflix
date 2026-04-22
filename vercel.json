@@ -1,5 +1,6 @@
 {
-  "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  "routes": [
+    { "src": "/api/tmdb/(.*)", "dest": "/api/tmdb.js" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }

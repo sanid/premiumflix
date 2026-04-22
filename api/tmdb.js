@@ -1,10 +1,10 @@
 /**
  * Vercel Serverless Function — TMDB proxy.
- * Keeps TMDB_API_KEY on the server; the client never sees it.
+ * Handles all requests to /api/tmdb/*
  *
- * Set these in Vercel project settings → Environment Variables:
- *   TMDB_API_KEY        = your-tmdb-v3-key   (server-side only)
- *   VITE_TMDB_USE_PROXY = true               (tells the frontend to use this proxy)
+ * Set in Vercel project → Environment Variables:
+ *   TMDB_API_KEY        = your-v3-api-key   (server-side only, never sent to client)
+ *   VITE_TMDB_USE_PROXY = true              (tells the frontend to route through here)
  */
 
 export default async function handler(req, res) {
@@ -13,16 +13,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'TMDB_API_KEY not configured on server' })
   }
 
-  // req.query.path is the [...path] catch-all, e.g. ['search', 'movie']
-  const pathParam = req.query.path
-  const tmdbPath = Array.isArray(pathParam) ? pathParam.join('/') : (pathParam ?? '')
+  // Strip /api/tmdb/ prefix to get the TMDB path, e.g. "search/movie"
+  const fullPath = req.url.split('?')[0]
+  const tmdbPath = fullPath.replace(/^\/api\/tmdb\/?/, '')
 
   const target = new URL(`https://api.themoviedb.org/3/${tmdbPath}`)
   target.searchParams.set('api_key', apiKey)
 
-  // Forward all other query params from the client (language, query, year, etc.)
-  for (const [k, v] of Object.entries(req.query)) {
-    if (k === 'path') continue
+  // Forward all query params from the client (language, query, year, etc.)
+  for (const [k, v] of Object.entries(req.query ?? {})) {
     target.searchParams.set(k, Array.isArray(v) ? v[0] : v ?? '')
   }
 
