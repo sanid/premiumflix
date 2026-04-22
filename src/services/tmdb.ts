@@ -19,7 +19,7 @@ function getLang(): string {
   return localStorage.getItem('tmdb_language') ?? 'en-US'
 }
 
-async function tmdbFetch<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+async function tmdbFetch<T>(path: string, params: Record<string, string> = {}, retries = 3): Promise<T> {
   const url = new URL(`${BASE_URL}/${path}`)
   url.searchParams.set('api_key', getApiKey())
   url.searchParams.set('language', getLang())
@@ -27,10 +27,11 @@ async function tmdbFetch<T>(path: string, params: Record<string, string> = {}): 
     url.searchParams.set(k, v)
   }
   const res = await fetch(url.toString())
-  if (res.status === 429) {
-    // Rate limited — wait and retry once
-    await new Promise((r) => setTimeout(r, 1500))
-    return tmdbFetch(path, params)
+  if (res.status === 429 && retries > 0) {
+    // Rate limited — exponential backoff
+    const delay = (4 - retries) * 1500
+    await new Promise((r) => setTimeout(r, delay))
+    return tmdbFetch(path, params, retries - 1)
   }
   if (!res.ok) throw new Error(`TMDB ${path}: HTTP ${res.status}`)
   return res.json() as Promise<T>

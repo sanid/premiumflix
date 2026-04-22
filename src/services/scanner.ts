@@ -435,6 +435,7 @@ async function fetchAllMetadata(
     await Promise.all(batch.map((m) => fetchMovieMeta(m)))
     progress.metadataFetched += batch.length
     tick()
+    await new Promise(r => setTimeout(r, 500)) // Throttle to prevent TMDB 429
   }
 
   for (let i = 0; i < showList.length; i += CONCURRENCY) {
@@ -442,6 +443,7 @@ async function fetchAllMetadata(
     await Promise.all(batch.map((s) => fetchShowMeta(s, shows)))
     progress.metadataFetched += batch.length
     tick()
+    await new Promise(r => setTimeout(r, 500)) // Throttle to prevent TMDB 429
   }
 }
 
