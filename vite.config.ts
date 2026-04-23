@@ -19,6 +19,13 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/imdbapi/, ''),
         secure: true,
       },
+      // Proxy SceneNZBs API to avoid CORS
+      '/scenenzbsapi': {
+        target: 'https://scenenzbs.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/scenenzbsapi/, ''),
+        secure: true,
+      },
     }
   },
   preview: {
@@ -33,6 +40,12 @@ export default defineConfig({
         target: 'https://api.imdbapi.dev',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/imdbapi/, ''),
+        secure: true,
+      },
+      '/scenenzbsapi': {
+        target: 'https://scenenzbs.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/scenenzbsapi/, ''),
         secure: true,
       },
     }

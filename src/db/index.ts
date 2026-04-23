@@ -54,6 +54,10 @@ export async function appendMovie(movie: Movie): Promise<void> {
   await db.movies.put(movie)
 }
 
+export async function appendTVShow(show: TVShow): Promise<void> {
+  await db.tvShows.put(show)
+}
+
 export async function clearLibrary(): Promise<void> {
   await db.transaction('rw', db.movies, db.tvShows, async () => {
     await db.movies.clear()

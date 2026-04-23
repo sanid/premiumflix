@@ -6,6 +6,7 @@ import {
   searchMovieRaw, searchTVRaw,
   getMovieDetailByTmdbId, getTVDetailByTmdbId,
   getVideos, getImages, isTMDB,
+  getSeasonDetail,
 } from '../services/metadata'
 import { bestLogoPath, bestTrailerKey } from '../services/tmdb'
 import { db } from '../db'
@@ -259,10 +260,26 @@ function MetadataEditor({ item, mediaType, onClose, onUpdated }: MetadataEditorP
       const trailerKey = videosRes.status === 'fulfilled' ? bestTrailerKey(videosRes.value) : item.trailerKey
       const logoPath = imagesRes.status === 'fulfilled' ? bestLogoPath(imagesRes.value.logos ?? []) : item.logoPath
 
-      const updates = { tmdbId: detail.id, tmdbDetail: detail, trailerKey, logoPath }
+      const updates: any = { tmdbId: detail.id, tmdbDetail: detail, trailerKey, logoPath }
       if (isMovie) {
         await db.movies.update(item.id, updates)
       } else {
+        // For TV shows, also fetch and assign episode metadata
+        const show = item as TVShow
+        const updatedSeasons = await Promise.all(show.seasons.map(async (s) => {
+          const tmdbSeason = detail.seasons?.find(ts => ts.season_number === s.number)
+          const seasonDetail = await getSeasonDetail(detail, s.number)
+          
+          return {
+            ...s,
+            tmdbSeason,
+            episodes: s.episodes.map(e => {
+              const tmdbEp = seasonDetail.episodes?.find(te => te.episode_number === e.number)
+              return { ...e, tmdbEpisode: tmdbEp }
+            })
+          }
+        }))
+        updates.seasons = updatedSeasons
         await db.tvShows.update(item.id, updates)
       }
       onUpdated({ ...item, ...updates } as Movie | TVShow)

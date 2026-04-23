@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import type { Movie, TVShow, ScanFolderSelection } from '../types'
 import { scanLibrary, type ScanProgress } from '../services/scanner'
-import { saveLibrary, loadLibrary, clearLibrary, appendMovie, deleteMovie, deleteTVShow } from '../db'
+import { saveLibrary, loadLibrary, clearLibrary, appendMovie, appendTVShow, deleteMovie, deleteTVShow } from '../db'
+import { ingestItem } from '../services/autoIngest'
+import { listTransfers } from '../services/premiumize'
 
 interface LibraryContextValue {
   movies: Movie[]
@@ -13,10 +15,14 @@ interface LibraryContextValue {
   scan: (customRoots?: ScanFolderSelection[]) => Promise<void>
   clearAndRescan: (customRoots?: ScanFolderSelection[]) => Promise<void>
   appendMovieToLibrary: (movie: Movie) => void
+  appendShowToLibrary: (show: TVShow) => void
   removeMovieFromLibrary: (id: string) => Promise<void>
   removeShowFromLibrary: (id: string) => Promise<void>
   updateMovieInLibrary: (movie: Movie) => void
   updateShowInLibrary: (show: TVShow) => void
+  monitorTransfer: (transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show' }) => void
+  notifications: string[]
+  dismissNotification: (index: number) => void
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null)
@@ -30,13 +36,96 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const [initialized, setInitialized] = useState(false)
   const scanningRef = useRef(false)
 
-  // Load from IndexedDB on mount
+  const [notifications, setNotifications] = useState<string[]>([])
+  const [pendingTransfers, setPendingTransfers] = useState<{ id: string; name: string; tmdbId?: number; type?: 'movie' | 'show' }[]>([])
+
+  // Load from IndexedDB and localStorage on mount
   useEffect(() => {
     loadLibrary().then(({ movies: m, tvShows: s }) => {
       setMovies(m)
       setTVShows(s)
       setInitialized(true)
     })
+    try {
+      const stored = localStorage.getItem('pending_transfers')
+      if (stored) setPendingTransfers(JSON.parse(stored))
+    } catch {}
+  }, [])
+
+  // Poll pending transfers
+  useEffect(() => {
+    if (pendingTransfers.length === 0) return
+    
+    const interval = setInterval(async () => {
+      try {
+        const { transfers } = await listTransfers()
+        const completed: string[] = []
+        
+        for (const pt of pendingTransfers) {
+          const t = transfers?.find(x => x.id === pt.id)
+          if (!t) continue // Maybe deleted
+          
+          const status = t.status?.toLowerCase() ?? ''
+          if (status === 'success' || status === 'finished' || status === 'seeding') {
+            completed.push(pt.id)
+            setNotifications(prev => [...prev, `✅ Download finished: ${pt.name}. You can now rescan your library!`])
+            
+            // If we have metadata hints, store them for the scanner
+            if (pt.tmdbId && pt.type) {
+              const itemId = t.folder_id || t.file_id
+              if (itemId) {
+                const hints = JSON.parse(localStorage.getItem('metadata_hints') || '{}')
+                hints[itemId] = { tmdbId: pt.tmdbId, type: pt.type }
+                localStorage.setItem('metadata_hints', JSON.stringify(hints))
+              }
+            }
+          } else if (status === 'error' || status === 'failed') {
+            completed.push(pt.id)
+            setNotifications(prev => [...prev, `❌ Download failed: ${pt.name}`])
+          }
+        }
+        
+        if (completed.length > 0) {
+          setPendingTransfers(prev => {
+            const next = prev.filter(p => !completed.includes(p.id))
+            localStorage.setItem('pending_transfers', JSON.stringify(next))
+            return next
+          })
+          
+          // Attempt automatic ingestion for completed transfers
+          for (const ptId of completed) {
+            const pt = pendingTransfers.find(p => p.id === ptId)
+            const t = transfers?.find(x => x.id === ptId)
+            const itemId = t?.folder_id || t?.file_id
+            
+            if (itemId && pt) {
+              ingestItem(itemId, pt.type).then(result => {
+                result.movies.forEach(m => appendMovieToLibrary(m))
+                result.shows.forEach(s => appendShowToLibrary(s))
+              }).catch(err => console.error('Auto-ingest failed', err))
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to poll transfers', e)
+      }
+    }, 10_000)
+    
+    return () => clearInterval(interval)
+  }, [pendingTransfers])
+
+  const monitorTransfer = useCallback((transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show' }) => {
+    setPendingTransfers(prev => {
+      if (prev.some(p => p.id === transferId)) return prev
+      const next = [...prev, { id: transferId, name, ...metadata }]
+      localStorage.setItem('pending_transfers', JSON.stringify(next))
+      setNotifications(prev => [...prev, `⬇️ Download started: ${name}`])
+      return next
+    })
+  }, [])
+
+  const dismissNotification = useCallback((index: number) => {
+    setNotifications(prev => prev.filter((_, i) => i !== index))
   }, [])
 
   const scan = useCallback(async (customRoots?: ScanFolderSelection[]) => {
@@ -79,10 +168,18 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
 
   const appendMovieToLibrary = useCallback((movie: Movie) => {
     setMovies(prev => {
-      // Replace if already exists (by id), otherwise prepend
       const exists = prev.some(m => m.id === movie.id)
       const updated = exists ? prev.map(m => m.id === movie.id ? movie : m) : [movie, ...prev]
       appendMovie(movie)
+      return updated
+    })
+  }, [])
+
+  const appendShowToLibrary = useCallback((show: TVShow) => {
+    setTVShows(prev => {
+      const exists = prev.some(s => s.id === show.id)
+      const updated = exists ? prev.map(s => s.id === show.id ? show : s) : [show, ...prev]
+      appendTVShow(show)
       return updated
     })
   }, [])
@@ -117,13 +214,28 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
         scan,
         clearAndRescan,
         appendMovieToLibrary,
+        appendShowToLibrary,
         removeMovieFromLibrary,
         removeShowFromLibrary,
         updateMovieInLibrary,
         updateShowInLibrary,
+        monitorTransfer,
+        notifications,
+        dismissNotification,
       }}
     >
       {children}
+      {/* Toast Notifications */}
+      {notifications.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full">
+          {notifications.map((note, i) => (
+            <div key={i} className="bg-premiumflix-surface border border-white/20 shadow-2xl rounded p-4 flex justify-between items-start gap-3">
+              <p className="text-white text-sm font-medium">{note}</p>
+              <button onClick={() => dismissNotification(i)} className="text-white/50 hover:text-white">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
     </LibraryContext.Provider>
   )
 }

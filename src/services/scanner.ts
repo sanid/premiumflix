@@ -129,6 +129,15 @@ function cleanTitle(raw: string): string {
   return s.replace(/\s+/g, ' ').trim()
 }
 
+function getMetadataHint(itemId: string): { tmdbId: number; type: 'movie' | 'show' } | null {
+  try {
+    const hints = JSON.parse(localStorage.getItem('metadata_hints') || '{}')
+    return hints[itemId] || null
+  } catch {
+    return null
+  }
+}
+
 function parseSeasonEpisode(filename: string): { season?: number; episode?: number; type: 'movie' | 'tvshow' } {
   const clean = filename.replace(/\./g, ' ').replace(/_/g, ' ')
   // S##E## pattern
@@ -309,7 +318,7 @@ const EXTRAS_FOLDERS = new Set([
   'interviews', 'trailers', 'behind-the-scenes', 'specials', 'short films', 'making of',
 ])
 
-async function processFolder(
+export async function processFolder(
   item: PMItem,
   movies: Movie[],
   shows: Map<string, TVShow>,
@@ -338,6 +347,11 @@ async function processFolder(
       if (dashMatch) {
         parsedTmdbId = parseInt(dashMatch[1])
         showTitle = dashMatch[2].replace(/\s+S\d{1,2}$/i, '').trim()
+      }
+      
+      const hint = getMetadataHint(item.id)
+      if (hint && hint.type === 'show') {
+        parsedTmdbId = hint.tmdbId
       }
 
       const showKey = showTitle.toLowerCase()
@@ -396,6 +410,11 @@ async function processFolder(
       if (dashMatch) {
         tmdbId = parseInt(dashMatch[1])
         title = dashMatch[2].trim() || title
+      }
+
+      const hint = getMetadataHint(item.id)
+      if (hint && hint.type === 'movie') {
+        tmdbId = hint.tmdbId
       }
 
       movies.push({
@@ -519,7 +538,7 @@ async function fetchAllMetadata(
   }
 }
 
-async function fetchMovieMeta(movie: Movie): Promise<void> {
+export async function fetchMovieMeta(movie: Movie): Promise<void> {
   try {
     let detail = null
     if (isTMDB() && movie.tmdbId) {
@@ -545,7 +564,7 @@ async function fetchMovieMeta(movie: Movie): Promise<void> {
   }
 }
 
-async function fetchShowMeta(show: TVShow, shows: Map<string, TVShow>): Promise<void> {
+export async function fetchShowMeta(show: TVShow, shows: Map<string, TVShow>): Promise<void> {
   try {
     let detail = null
     if (isTMDB() && show.tmdbId) {
