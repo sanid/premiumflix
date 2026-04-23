@@ -22,11 +22,12 @@ import { useI18n } from '../contexts/I18nContext'
 
 export function MovieDetail() {
   const { id } = useParams<{ id: string }>()
-  const { movies } = useLibrary()
+  const { movies, removeMovieFromLibrary } = useLibrary()
   const { isFavorite, isOnWatchlist, toggleFavorite, toggleWatchlist } = useCollection()
   const { getProgressFraction, isFinished } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
 
   const movie = movies.find((m) => m.id === id)
 
@@ -94,9 +95,18 @@ export function MovieDetail() {
       onPlay={() => play()}
       onToggleFavorite={() => toggleFavorite(movie!.id, 'movie')}
       onToggleWatchlist={() => toggleWatchlist(movie!.id, 'movie')}
+      onDelete={() => {
+        if (deleteConfirm) {
+          removeMovieFromLibrary(movie!.id).then(() => navigate('/'))
+        } else {
+          setDeleteConfirm(true)
+          setTimeout(() => setDeleteConfirm(false), 4000)
+        }
+      }}
+      deleteConfirm={deleteConfirm}
     >
       {/* Files section */}
-      {movie.files.length > 1 && (
+      {movie.files.length > 0 && (
         <section className="mt-8">
           <h3 className="text-white font-bold text-lg mb-3">{t.detail.files}</h3>
           <div className="space-y-2">
@@ -111,6 +121,8 @@ export function MovieDetail() {
                   <div className="flex gap-3 mt-1 text-premiumflix-muted text-xs">
                     {file.resolution && <span>{file.resolution}</span>}
                     {file.videoCodec && <span>{file.videoCodec.toUpperCase()}</span>}
+                    {file.audioCodec && <span>{file.audioCodec.toUpperCase()}</span>}
+                    {file.language && <span>{file.language.toUpperCase()}</span>}
                     {file.size > 0 && <span>{formatFileSize(file.size)}</span>}
                   </div>
                 </div>
@@ -126,7 +138,7 @@ export function MovieDetail() {
 
 export function ShowDetail() {
   const { id } = useParams<{ id: string }>()
-  const { tvShows } = useLibrary()
+  const { tvShows, removeShowFromLibrary } = useLibrary()
   const { isFavorite, isOnWatchlist, toggleFavorite, toggleWatchlist } = useCollection()
   const { getProgressFraction } = useWatchProgress()
   const { t } = useI18n()
@@ -135,6 +147,7 @@ export function ShowDetail() {
   const show = tvShows.find((s) => s.id === id)
   const [selectedSeason, setSelectedSeason] = useState(0)
   const [localCredits, setLocalCredits] = useState(show?.credits)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
 
   useEffect(() => {
     if (show?.seasons.length) setSelectedSeason(0)
@@ -198,6 +211,15 @@ export function ShowDetail() {
       }}
       onToggleFavorite={() => toggleFavorite(show.id, 'show')}
       onToggleWatchlist={() => toggleWatchlist(show.id, 'show')}
+      onDelete={() => {
+        if (deleteConfirm) {
+          removeShowFromLibrary(show!.id).then(() => navigate('/'))
+        } else {
+          setDeleteConfirm(true)
+          setTimeout(() => setDeleteConfirm(false), 4000)
+        }
+      }}
+      deleteConfirm={deleteConfirm}
     >
       {/* Season selector + episodes */}
       {sortedSeasons.length > 0 && (
@@ -271,10 +293,13 @@ export function ShowDetail() {
                         {tmdbEp?.overview && (
                           <p className="text-premiumflix-muted text-xs mt-1 line-clamp-2">{tmdbEp.overview}</p>
                         )}
-                        <div className="flex gap-2 mt-1 text-premiumflix-muted text-xs">
+                        <div className="flex gap-2 mt-1 text-premiumflix-muted text-xs flex-wrap">
                           {tmdbEp?.air_date && <span>{tmdbEp.air_date.slice(0, 4)}</span>}
-                          {ep.file.size > 0 && <span>{formatFileSize(ep.file.size)}</span>}
                           {ep.file.resolution && <span>{ep.file.resolution}</span>}
+                          {ep.file.videoCodec && <span>{ep.file.videoCodec.toUpperCase()}</span>}
+                          {ep.file.audioCodec && <span>{ep.file.audioCodec.toUpperCase()}</span>}
+                          {ep.file.language && <span>{ep.file.language.toUpperCase()}</span>}
+                          {ep.file.size > 0 && <span>{formatFileSize(ep.file.size)}</span>}
                         </div>
                       </div>
                     </div>
@@ -309,6 +334,8 @@ interface DetailShellProps {
   onPlay: () => void
   onToggleFavorite: () => void
   onToggleWatchlist: () => void
+  onDelete?: () => void
+  deleteConfirm?: boolean
   children?: React.ReactNode
 }
 
@@ -331,6 +358,8 @@ function DetailShell({
   onPlay,
   onToggleFavorite,
   onToggleWatchlist,
+  onDelete,
+  deleteConfirm,
   children,
 }: DetailShellProps) {
   const navigate = useNavigate()
@@ -443,6 +472,21 @@ function DetailShell({
                     <path d="M10 16.5l6-4.5-6-4.5v9zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" />
                   </svg>
                   {t.detail.trailer}
+                </button>
+              )}
+
+              {onDelete && (
+                <button
+                  onClick={onDelete}
+                  className={`flex items-center gap-2 font-bold px-5 py-2.5 rounded transition-colors ${
+                    deleteConfirm
+                      ? 'bg-red-700 text-white animate-pulse'
+                      : 'bg-premiumflix-surface border border-red-700/50 text-red-400 hover:bg-red-700/20'
+                  }`}
+                  title="Remove from library"
+                >
+                  <TrashIcon className="w-5 h-5" />
+                  {deleteConfirm ? 'Tap again to confirm' : 'Remove'}
                 </button>
               )}
 
@@ -567,3 +611,12 @@ function HeartIcon({ className, filled }: { className?: string; filled?: boolean
     </svg>
   )
 }
+
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  )
+}
+

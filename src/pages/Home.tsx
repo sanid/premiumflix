@@ -4,7 +4,7 @@ import { useLibrary } from '../contexts/LibraryContext'
 import { useCollection } from '../hooks/useCollection'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import { useI18n } from '../contexts/I18nContext'
-import { MovieRow, ShowRow } from '../components/MediaRow'
+import { MovieRow, ShowRow, ContinueWatchingRow } from '../components/MediaRow'
 import { HeroMovie, HeroShow } from '../components/HeroSection'
 import { movieDisplayTitle, showDisplayTitle, movieMainFile } from '../types'
 import type { Movie, TVShow } from '../types'
@@ -12,7 +12,7 @@ import type { Movie, TVShow } from '../types'
 export function Home() {
   const { movies, tvShows, isLoading, scanProgress, hasLibrary, scan } = useLibrary()
   const { favoriteIds, watchlistIds } = useCollection()
-  const { inProgress, getProgressFraction } = useWatchProgress()
+  const { inProgress, getProgressFraction, removeProgress } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
 
@@ -28,15 +28,48 @@ export function Home() {
 
   // Continue watching: movies/shows with in-progress files
   const continueWatching = useMemo(() => {
-    const results: Movie[] = []
-    for (const p of inProgress.slice(0, 20)) {
+    type ContinueItem = {
+      type: 'movie'
+      movie: Movie
+      fileId: string
+      lastWatched: number
+    } | {
+      type: 'show'
+      show: TVShow
+      fileId: string
+      episodeLabel: string
+      lastWatched: number
+    }
+
+    const results: ContinueItem[] = []
+    const seen = new Set<string>()
+
+    for (const p of inProgress.slice(0, 30)) {
+      // Check movies
       const movie = movies.find((m) => m.files.some((f) => f.id === p.fileId))
-      if (movie && !results.find((m) => m.id === movie.id)) {
-        results.push(movie)
+      if (movie && !seen.has(movie.id)) {
+        seen.add(movie.id)
+        results.push({ type: 'movie', movie, fileId: p.fileId, lastWatched: p.lastWatched })
+        continue
+      }
+      // Check TV shows
+      for (const show of tvShows) {
+        for (const season of show.seasons) {
+          const ep = season.episodes.find((e) => e.file.id === p.fileId)
+          if (ep && !seen.has(`show-${show.id}-${ep.id}`)) {
+            seen.add(`show-${show.id}-${ep.id}`)
+            const epLabel = ep.tmdbEpisode?.name
+              ? `S${String(season.number).padStart(2, '0')}E${String(ep.number).padStart(2, '0')} — ${ep.tmdbEpisode.name}`
+              : `S${String(season.number).padStart(2, '0')}E${String(ep.number).padStart(2, '0')}`
+            results.push({ type: 'show', show, fileId: p.fileId, episodeLabel: epLabel, lastWatched: p.lastWatched })
+            break
+          }
+        }
       }
     }
-    return results
-  }, [movies, inProgress])
+
+    return results.sort((a, b) => b.lastWatched - a.lastWatched).slice(0, 20)
+  }, [movies, tvShows, inProgress])
 
   // My List
   const myListMovies = useMemo(
@@ -147,7 +180,11 @@ export function Home() {
       {/* Content rows */}
       <div className="-mt-16 relative z-10 pb-16">
         {continueWatching.length > 0 && (
-          <MovieRow title={t.home.continueWatching} movies={continueWatching} />
+          <ContinueWatchingRow
+            title={t.home.continueWatching}
+            items={continueWatching}
+            onRemove={removeProgress}
+          />
         )}
 
         {(myListMovies.length > 0 || myListShows.length > 0) && (

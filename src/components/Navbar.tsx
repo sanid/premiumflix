@@ -48,6 +48,7 @@ export function Navbar() {
             <NavLink to="/shows" className={navLinkClass}>{t.nav.shows}</NavLink>
             <NavLink to="/watchlist" className={navLinkClass}>{t.nav.myList}</NavLink>
             <NavLink to="/add-movie" className={navLinkClass}>{t.home.addMovie}</NavLink>
+            <NavLink to="/management" className={navLinkClass}>Manage</NavLink>
           </div>
 
           {/* Right side */}
@@ -100,6 +101,7 @@ export function Navbar() {
               { to: '/shows', label: t.nav.shows },
               { to: '/watchlist', label: t.nav.myList },
               { to: '/add-movie', label: t.home.addMovie },
+              { to: '/management', label: 'Manage' },
             ].map(({ to, label }) => (
               <NavLink
                 key={to}

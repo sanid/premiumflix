@@ -13,6 +13,15 @@ import type { Movie, MediaFile, PMItem } from '../types'
 
 const VIDEO_EXTS = ['mkv', 'mp4', 'avi', 'm4v', 'mov', 'wmv', 'ts', 'flv', 'webm', 'mpg', 'mpeg']
 
+function qualityToResolution(quality: string): string {
+  const q = quality.toLowerCase()
+  if (q.includes('2160') || q.includes('4k')) return '3840x2160'
+  if (q.includes('1080')) return '1920x1080'
+  if (q.includes('720')) return '1280x720'
+  if (q.includes('480')) return '854x480'
+  return quality
+}
+
 function isVideo(item: PMItem): boolean {
   if (item.mime_type?.startsWith('video/')) return true
   const ext = item.name.split('.').pop()?.toLowerCase() ?? ''
@@ -94,6 +103,7 @@ export async function ingestNewMovie(
   onStatus: (msg: string) => void,
   onDone: (movie: Movie) => void,
   onError: (err: string) => void,
+  ytsHints?: { quality?: string; videoCodec?: string; audioCodec?: string; language?: string },
 ): Promise<void> {
   try {
     onStatus('Waiting for Premiumize to process...')
@@ -130,6 +140,19 @@ export async function ingestNewMovie(
     if (files.length === 0) {
       onError('Could not find video files for this transfer')
       return
+    }
+
+    // Stamp files with YTS quality hints
+    if (ytsHints) {
+      files = files.map(f => ({
+        ...f,
+        videoCodec: ytsHints.videoCodec ?? f.videoCodec,
+        audioCodec: ytsHints.audioCodec ?? f.audioCodec,
+        resolution: ytsHints.quality
+          ? qualityToResolution(ytsHints.quality)
+          : f.resolution,
+        language: ytsHints.language ?? f.language,
+      }))
     }
 
     onStatus('Fetching movie metadata...')

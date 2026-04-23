@@ -61,6 +61,14 @@ export async function clearLibrary(): Promise<void> {
   })
 }
 
+export async function deleteMovie(id: string): Promise<void> {
+  await db.movies.delete(id)
+}
+
+export async function deleteTVShow(id: string): Promise<void> {
+  await db.tvShows.delete(id)
+}
+
 // ─── Watch progress helpers ───────────────────────────────────────────────────
 
 export async function getProgress(fileId: string): Promise<WatchProgress | undefined> {

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import type { Movie, TVShow, ScanFolderSelection } from '../types'
 import { scanLibrary, type ScanProgress } from '../services/scanner'
-import { saveLibrary, loadLibrary, clearLibrary, appendMovie } from '../db'
+import { saveLibrary, loadLibrary, clearLibrary, appendMovie, deleteMovie, deleteTVShow } from '../db'
 
 interface LibraryContextValue {
   movies: Movie[]
@@ -13,6 +13,10 @@ interface LibraryContextValue {
   scan: (customRoots?: ScanFolderSelection[]) => Promise<void>
   clearAndRescan: (customRoots?: ScanFolderSelection[]) => Promise<void>
   appendMovieToLibrary: (movie: Movie) => void
+  removeMovieFromLibrary: (id: string) => Promise<void>
+  removeShowFromLibrary: (id: string) => Promise<void>
+  updateMovieInLibrary: (movie: Movie) => void
+  updateShowInLibrary: (show: TVShow) => void
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null)
@@ -83,6 +87,24 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  const removeMovieFromLibrary = useCallback(async (id: string) => {
+    await deleteMovie(id)
+    setMovies(prev => prev.filter(m => m.id !== id))
+  }, [])
+
+  const removeShowFromLibrary = useCallback(async (id: string) => {
+    await deleteTVShow(id)
+    setTVShows(prev => prev.filter(s => s.id !== id))
+  }, [])
+
+  const updateMovieInLibrary = useCallback((movie: Movie) => {
+    setMovies(prev => prev.map(m => m.id === movie.id ? movie : m))
+  }, [])
+
+  const updateShowInLibrary = useCallback((show: TVShow) => {
+    setTVShows(prev => prev.map(s => s.id === show.id ? show : s))
+  }, [])
+
   return (
     <LibraryContext.Provider
       value={{
@@ -95,6 +117,10 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
         scan,
         clearAndRescan,
         appendMovieToLibrary,
+        removeMovieFromLibrary,
+        removeShowFromLibrary,
+        updateMovieInLibrary,
+        updateShowInLibrary,
       }}
     >
       {children}

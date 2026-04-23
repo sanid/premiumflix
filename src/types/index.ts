@@ -216,6 +216,7 @@ export interface MediaFile {
   resolution?: string
   videoCodec?: string
   audioCodec?: string
+  language?: string
   premiumizeId: string
   episodeNumber?: number
   seasonNumber?: number

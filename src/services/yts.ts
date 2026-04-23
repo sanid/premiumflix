@@ -8,6 +8,8 @@ export interface YTSTorrent {
   size: string
   size_bytes: number
   date_uploaded: string
+  video_codec?: string
+  audio_codec?: string
 }
 
 export interface YTSMovie {
@@ -18,6 +20,7 @@ export interface YTSMovie {
   genres: string[]
   imdb_code: string
   large_cover_image: string
+  language?: string
   torrents?: YTSTorrent[]
 }
 

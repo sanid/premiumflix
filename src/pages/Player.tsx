@@ -95,10 +95,9 @@ export function Player() {
     }
 
     if (f.directLink) {
-      // Start playing immediately — no wait.
+      // Start playing immediately. Transcode in background as fallback
       setPlayUrl(f.directLink)
       setLoading(false)
-      // Fetch transcoded stream in background as silent fallback.
       const transcodeFallback = fetchItemDetailsWithTranscode(pmId)
         .then((d) => d.stream_link ?? d.link ?? null)
         .catch(() => null)
@@ -106,15 +105,15 @@ export function Player() {
       return
     }
 
-    // No cached URL — must fetch. MKV may need to wait for transcode.
+    // No cached URL or MKV — must fetch transcoded stream.
     const isMkv =
       f.fileName.toLowerCase().endsWith('.mkv') || f.mimeType === 'video/x-matroska'
 
-    fetchItemDetailsWithTranscode(pmId, isMkv ? 10 : 1)
+    fetchItemDetailsWithTranscode(pmId, isMkv ? 20 : 3)
       .then((d) => {
         const url = d.stream_link ?? d.link ?? null
         if (url) setPlayUrl(url)
-        else setError('Could not get playback URL. The file may still be transcoding.')
+        else setError('Could not get playback URL. The file may still be transcoding — try again in a few minutes.')
       })
       .catch(() => setError('Failed to fetch playback URL.'))
       .finally(() => setLoading(false))

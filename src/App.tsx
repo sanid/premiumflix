@@ -10,6 +10,7 @@ import { Settings } from './pages/Settings'
 import { Watchlist } from './pages/Watchlist'
 import { Search } from './pages/Search'
 import { AddMovie } from './pages/AddMovie'
+import { Management } from './pages/Management'
 import { LibraryProvider } from './contexts/LibraryContext'
 import { I18nProvider } from './contexts/I18nContext'
 
@@ -45,6 +46,7 @@ export default function App() {
                 <Route path="/watchlist" element={<Watchlist />} />
                 <Route path="/search" element={<Search />} />
                 <Route path="/add-movie" element={<AddMovie />} />
+                <Route path="/management" element={<Management />} />
                 <Route path="/movie/:id" element={<MovieDetail />} />
                 <Route path="/show/:id" element={<ShowDetail />} />
                 <Route path="/settings" element={<Settings />} />

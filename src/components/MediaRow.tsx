@@ -3,7 +3,7 @@ import type { Movie, TVShow } from '../types'
 import { MovieCard, ShowCard } from './MediaCard'
 import { useNavigate } from 'react-router-dom'
 import { useWatchProgress } from '../hooks/useWatchProgress'
-import { movieMainFile } from '../types'
+import { movieDisplayTitle, showDisplayTitle, movieMainFile, moviePosterUrl, showPosterUrl } from '../types'
 
 interface MovieRowProps {
   title: string
@@ -15,6 +15,25 @@ interface ShowRowProps {
   title: string
   shows: TVShow[]
   showViewAll?: string
+}
+
+type ContinueItem = {
+  type: 'movie'
+  movie: Movie
+  fileId: string
+  lastWatched: number
+} | {
+  type: 'show'
+  show: TVShow
+  fileId: string
+  episodeLabel: string
+  lastWatched: number
+}
+
+interface ContinueWatchingRowProps {
+  title: string
+  items: ContinueItem[]
+  onRemove: (fileId: string) => void
 }
 
 function RowShell({
@@ -114,6 +133,147 @@ export function ShowRow({ title, shows, showViewAll }: ShowRowProps) {
         <ShowCard key={show.id} show={show} />
       ))}
     </RowShell>
+  )
+}
+
+export function ContinueWatchingRow({ title, items, onRemove }: ContinueWatchingRowProps) {
+  const navigate = useNavigate()
+  const { getProgressFraction } = useWatchProgress()
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  function scrollBy(dir: number) {
+    scrollRef.current?.scrollBy({ left: dir * 400, behavior: 'smooth' })
+  }
+
+  return (
+    <section className="py-4 group/row">
+      <div className="px-4 sm:px-8 lg:px-12 flex items-center gap-3 mb-3">
+        <h2 className="text-white font-bold text-base sm:text-lg">{title}</h2>
+      </div>
+
+      <div className="relative">
+        <button
+          onClick={() => scrollBy(-1)}
+          className="absolute left-0 top-0 bottom-0 z-10 px-2 flex items-center bg-gradient-to-r from-premiumflix-dark to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity"
+        >
+          <div className="bg-black/60 rounded-full p-1.5 hover:bg-black/80">
+            <ChevronLeft className="w-5 h-5 text-white" />
+          </div>
+        </button>
+
+        <div
+          ref={scrollRef}
+          className="flex gap-3 overflow-x-auto scrollbar-hide px-4 sm:px-8 lg:px-12 pb-2"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' } as React.CSSProperties}
+        >
+          {items.map((item) => {
+            const fraction = getProgressFraction(item.fileId)
+            const isMovie = item.type === 'movie'
+            const poster = isMovie ? moviePosterUrl(item.movie) : showPosterUrl(item.show)
+            const title = isMovie ? movieDisplayTitle(item.movie) : showDisplayTitle(item.show)
+            const sub = isMovie
+              ? (item.movie.tmdbDetail?.release_date?.slice(0, 4) ?? item.movie.year)
+              : (item as any).episodeLabel
+
+            function handleClick() {
+              if (item.type === 'movie') {
+                navigate(`/movie/${item.movie.id}`)
+              } else {
+                navigate(`/show/${item.show.id}`)
+              }
+            }
+
+            function handlePlay(e: React.MouseEvent) {
+              e.stopPropagation()
+              if (item.type === 'movie') {
+                navigate(`/play/movie/${item.movie.id}/${item.fileId}`)
+              } else {
+                navigate(`/play/show/${item.show.id}/${item.fileId}`)
+              }
+            }
+
+            function handleRemove(e: React.MouseEvent) {
+              e.stopPropagation()
+              onRemove(item.fileId)
+            }
+
+            return (
+              <div
+                key={`${item.type}-${item.fileId}`}
+                className="group/cw relative flex-shrink-0 cursor-pointer"
+                style={{ width: '220px' }}
+                onClick={handleClick}
+              >
+                {/* Poster */}
+                <div className="relative overflow-hidden rounded-md bg-premiumflix-surface aspect-video transition-transform duration-200 group-hover/cw:scale-105 group-hover/cw:z-10 group-hover/cw:shadow-2xl">
+                  {poster ? (
+                    <img
+                      src={poster}
+                      alt={title}
+                      loading="lazy"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-premiumflix-surface to-premiumflix-dark">
+                      <span className="text-premiumflix-muted text-xs text-center px-2">{title}</span>
+                    </div>
+                  )}
+
+                  {/* Gradient + play button on hover */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover/cw:opacity-100 transition-opacity duration-200" />
+
+                  {/* Play button */}
+                  <button
+                    onClick={handlePlay}
+                    className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/cw:opacity-100 transition-opacity duration-200"
+                  >
+                    <div className="bg-white/20 backdrop-blur-sm rounded-full p-3 hover:bg-white/30 transition-colors">
+                      <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    </div>
+                  </button>
+
+                  {/* Remove button */}
+                  <button
+                    onClick={handleRemove}
+                    className="absolute top-1.5 right-1.5 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover/cw:opacity-100 transition-opacity hover:bg-black/80"
+                    title="Remove from Continue Watching"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+
+                  {/* Progress bar */}
+                  {fraction > 0 && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+                      <div
+                        className="h-full bg-premiumflix-red transition-all"
+                        style={{ width: `${fraction * 100}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Title + sub below */}
+                <p className="mt-1.5 text-white text-xs font-semibold truncate">{title}</p>
+                {sub && <p className="text-premiumflix-muted text-xs truncate">{sub}</p>}
+              </div>
+            )
+          })}
+        </div>
+
+        <button
+          onClick={() => scrollBy(1)}
+          className="absolute right-0 top-0 bottom-0 z-10 px-2 flex items-center bg-gradient-to-l from-premiumflix-dark to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity"
+        >
+          <div className="bg-black/60 rounded-full p-1.5 hover:bg-black/80">
+            <ChevronRight className="w-5 h-5 text-white" />
+          </div>
+        </button>
+      </div>
+    </section>
   )
 }
 

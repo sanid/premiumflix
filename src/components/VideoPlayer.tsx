@@ -163,14 +163,22 @@ export function VideoPlayer({
   }, [isCasting])
 
   // Resolve fallbackSrc promise eagerly so it's ready the moment we need it
+  const [fallbackReady, setFallbackReady] = useState(false)
   useEffect(() => {
     resolvedFallback.current = null
     triedFallback.current = false
+    setFallbackReady(false)
     if (!fallbackSrc) return
     if (typeof fallbackSrc === 'string') {
       resolvedFallback.current = fallbackSrc
+      setFallbackReady(true)
     } else {
-      fallbackSrc.then((url) => { resolvedFallback.current = url })
+      fallbackSrc.then((url) => {
+        if (url) {
+          resolvedFallback.current = url
+          setFallbackReady(true)
+        }
+      })
     }
   }, [fallbackSrc])
 
@@ -747,8 +755,24 @@ export function VideoPlayer({
                 </div>
               )}
 
-              {/* Audio / Language switcher */}
-              {audioTracks.length > 1 && (
+              {/* Fix Audio / Transcode switch */}
+              {fallbackReady && activeSrc !== resolvedFallback.current && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    triedFallback.current = true
+                    setActiveSrc(resolvedFallback.current!)
+                  }}
+                  className="text-white hover:text-white/70 transition-colors flex items-center gap-1 text-xs font-bold px-2 py-1 rounded bg-premiumflix-red/80 hover:bg-premiumflix-red border border-white/10 hover:border-white/40"
+                  title="Switch to transcoded stream (Fixes missing audio)"
+                >
+                  <FixAudioIcon className="w-4 h-4" />
+                  <span>Fix Audio</span>
+                </button>
+              )}
+
+              {/* Audio / Language switcher — shown when HLS has at least 1 audio track */}
+              {audioTracks.length >= 1 && (
                 <div className="relative">
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowLangMenu((v) => !v) }}
@@ -846,6 +870,10 @@ function srtToVtt(srt: string): string {
 
 function PlayIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+}
+
+function FixAudioIcon({ className }: { className?: string }) {
+  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
 }
 
 function PauseIcon({ className }: { className?: string }) {

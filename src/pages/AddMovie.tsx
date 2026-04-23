@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react'
 import { searchYTS, getMovieTorrents, generateMagnet } from '../services/yts'
 import type { YTSMovie, YTSTorrent } from '../services/yts'
-import { createTransfer, getOrCreateMoviesFolder } from '../services/premiumize'
+import { createTransfer, getOrCreateMoviesFolder, getOrCreateShowsFolder } from '../services/premiumize'
 import { ingestNewMovie } from '../services/ingest'
 import { useI18n } from '../contexts/I18nContext'
 import { useLibrary } from '../contexts/LibraryContext'
+
+type MediaTypeFilter = 'movie' | 'show'
 
 export function AddMovie() {
   const { t } = useI18n()
   const { appendMovieToLibrary } = useLibrary()
   const [search, setSearch] = useState('')
+  const [mediaType, setMediaType] = useState<MediaTypeFilter>('movie')
   const [movies, setMovies] = useState<YTSMovie[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedMovie, setSelectedMovie] = useState<YTSMovie | null>(null)
@@ -20,19 +23,21 @@ export function AddMovie() {
 
   // Fetch popular movies by default
   useEffect(() => {
-    fetchMovies()
+    fetchMovies(search, mediaType)
   }, [])
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      fetchMovies(search)
+      fetchMovies(search, mediaType)
     }, 500)
     return () => clearTimeout(delayDebounceFn)
-  }, [search])
+  }, [search, mediaType])
 
-  async function fetchMovies(query = '') {
+  async function fetchMovies(query = '', type: MediaTypeFilter = 'movie') {
     setLoading(true)
     try {
+      // YTS only has movies; for shows we still search YTS but they're rare —
+      // show a note if type is 'show'. In future this could integrate EZTV.
       const data = await searchYTS(query)
       setMovies(data.movies ?? [])
     } catch (e) {
@@ -70,28 +75,46 @@ export function AddMovie() {
     setStatusMsg(prev => ({ ...prev, [id]: 'Sending to Premiumize...' }))
     try {
       const magnet = generateMagnet(torrent.hash, movie.title)
-      const moviesFolderId = await getOrCreateMoviesFolder()
-      const transfer = await createTransfer(magnet, moviesFolderId)
+      let folderId: string | undefined
+      if (mediaType === 'show') {
+        folderId = await getOrCreateShowsFolder()
+      } else {
+        folderId = await getOrCreateMoviesFolder()
+      }
+      const transfer = await createTransfer(magnet, folderId)
       setStatusMsg(prev => ({ ...prev, [id]: 'Queued — waiting for download...' }))
 
-      // Kick off background ingest — does NOT block the UI
-      ingestNewMovie(
-        transfer.id,
-        movie.title,
-        movie.year,
-        moviesFolderId,
-        (msg) => setStatusMsg(prev => ({ ...prev, [id]: msg })),
-        (ingestedMovie) => {
-          appendMovieToLibrary(ingestedMovie)
-          setStatus(prev => ({ ...prev, [id]: 'success' }))
-          setStatusMsg(prev => ({ ...prev, [id]: 'Added to library!' }))
-        },
-        (err) => {
-          console.error('Ingest error:', err)
-          setStatus(prev => ({ ...prev, [id]: 'error' }))
-          setStatusMsg(prev => ({ ...prev, [id]: err }))
-        },
-      )
+      if (mediaType === 'movie') {
+        // Kick off background ingest — does NOT block the UI
+        ingestNewMovie(
+          transfer.id,
+          movie.title,
+          movie.year,
+          folderId,
+          (msg) => setStatusMsg(prev => ({ ...prev, [id]: msg })),
+          (ingestedMovie) => {
+            appendMovieToLibrary(ingestedMovie)
+            setStatus(prev => ({ ...prev, [id]: 'success' }))
+            setStatusMsg(prev => ({ ...prev, [id]: 'Added to library! Rescan to see it.' }))
+          },
+          (err) => {
+            console.error('Ingest error:', err)
+            setStatus(prev => ({ ...prev, [id]: 'error' }))
+            setStatusMsg(prev => ({ ...prev, [id]: err }))
+          },
+          {
+            quality: torrent.quality,
+            videoCodec: torrent.video_codec,
+            audioCodec: 'aac', // Or infer from somewhere else if YTS provides it
+            language: movie.language,
+          }
+        )
+      } else {
+        // For TV shows we can't auto-ingest the same way (need episode structure)
+        // — the user should rescan after the download finishes
+        setStatus(prev => ({ ...prev, [id]: 'success' }))
+        setStatusMsg(prev => ({ ...prev, [id]: 'Sent to Premiumize! Rescan library once download finishes.' }))
+      }
     } catch (e) {
       console.error(e)
       setStatus(prev => ({ ...prev, [id]: 'error' }))
@@ -102,17 +125,49 @@ export function AddMovie() {
   return (
     <div className="min-h-screen bg-premiumflix-dark pt-20 pb-16">
       <div className="px-4 sm:px-8 lg:px-12 max-w-7xl mx-auto">
-        <h1 className="text-white text-3xl font-black mb-6">{t.addMovie.title}</h1>
-        
-        <div className="mb-8">
+        <h1 className="text-white text-3xl font-black mb-2">Add to Library</h1>
+        <p className="text-premiumflix-muted text-sm mb-6">
+          Source: <span className="text-white/60">YTS (movies-api.accel.li)</span>
+          {' '}— torrents are sent to Premiumize for cloud download.
+          {' '}<span className="text-yellow-400">Storage full?</span> Delete unused titles from their detail page first.
+        </p>
+
+        {/* Type toggle + search */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-8">
+          {/* Type switcher */}
+          <div className="flex bg-premiumflix-surface border border-white/10 rounded-md overflow-hidden flex-shrink-0">
+            <button
+              onClick={() => setMediaType('movie')}
+              className={`px-5 py-2.5 text-sm font-bold transition-colors ${
+                mediaType === 'movie' ? 'bg-premiumflix-red text-white' : 'text-premiumflix-muted hover:text-white'
+              }`}
+            >
+              🎬 Movies
+            </button>
+            <button
+              onClick={() => setMediaType('show')}
+              className={`px-5 py-2.5 text-sm font-bold transition-colors ${
+                mediaType === 'show' ? 'bg-premiumflix-red text-white' : 'text-premiumflix-muted hover:text-white'
+              }`}
+            >
+              📺 TV Shows
+            </button>
+          </div>
+
           <input
             type="text"
-            placeholder={t.addMovie.searchPlaceholder}
+            placeholder={mediaType === 'show' ? 'Search for TV shows...' : t.addMovie.searchPlaceholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full sm:w-96 bg-premiumflix-surface border border-white/10 text-white text-sm px-4 py-3 rounded-md outline-none focus:border-white/40"
+            className="flex-1 bg-premiumflix-surface border border-white/10 text-white text-sm px-4 py-3 rounded-md outline-none focus:border-white/40"
           />
         </div>
+
+        {mediaType === 'show' && (
+          <div className="mb-6 bg-yellow-900/30 border border-yellow-600/40 rounded-lg px-4 py-3 text-sm text-yellow-200">
+            <strong>Note:</strong> YTS primarily lists movies. TV show results may be limited. After adding, wait for the download to finish on Premiumize, then do a library rescan to see the series.
+          </div>
+        )}
 
         {loading && movies.length === 0 ? (
           <p className="text-premiumflix-muted">Loading...</p>
@@ -171,6 +226,11 @@ export function AddMovie() {
                       <span>{selectedMovie.year}</span>
                       <span className="text-yellow-400 font-medium">★ {selectedMovie.rating}</span>
                       {selectedMovie.genres && <span>{selectedMovie.genres.slice(0, 3).join(', ')}</span>}
+                    </div>
+                    <div className="mt-2">
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${mediaType === 'show' ? 'bg-blue-700 text-white' : 'bg-premiumflix-red text-white'}`}>
+                        {mediaType === 'show' ? '📺 TV Show' : '🎬 Movie'}
+                      </span>
                     </div>
                   </div>
                   <button 

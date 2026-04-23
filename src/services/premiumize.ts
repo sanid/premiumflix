@@ -47,6 +47,32 @@ export async function listTransfers(): Promise<PMTransferListResponse> {
   return pmFetch<PMTransferListResponse>('transfer/list')
 }
 
+export async function deleteItem(id: string): Promise<{ status: string }> {
+  const url = new URL(`${baseUrl()}/item/delete`, window.location.href)
+  url.searchParams.set('apikey', getApiKey())
+  const body = new URLSearchParams({ id })
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function deleteFolder(id: string): Promise<{ status: string }> {
+  const url = new URL(`${baseUrl()}/folder/delete`, window.location.href)
+  url.searchParams.set('apikey', getApiKey())
+  const body = new URLSearchParams({ id })
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
 export async function createTransfer(src: string, folderId?: string): Promise<{ status: string; id: string; name?: string }> {
   const url = new URL(`${baseUrl()}/transfer/create`, window.location.href)
   url.searchParams.set('apikey', getApiKey())
@@ -108,6 +134,35 @@ export async function getOrCreateMoviesFolder(): Promise<string | undefined> {
   }
 }
 
+export async function getOrCreateShowsFolder(): Promise<string | undefined> {
+  try {
+    const raw = localStorage.getItem('scan_folders')
+    if (raw) {
+      const folders = JSON.parse(raw)
+      const showFolder = folders.find((f: any) => f.kind === 'tvShows')
+      if (showFolder) {
+        return showFolder.id
+      }
+    }
+  } catch (e) {
+    console.error('Failed to parse scan_folders', e)
+  }
+
+  const SHOW_NAMES = new Set(['Series', 'TV Shows', 'TV', 'Shows', 'Serien', 'Serie', 'Serier', 'TV Series'])
+  try {
+    const root = await listFolder()
+    const showsFolder = root.content?.find(item => item.type === 'folder' && SHOW_NAMES.has(item.name))
+    if (showsFolder) {
+      return showsFolder.id
+    }
+    const created = await createFolder('Series')
+    return created.id
+  } catch (e) {
+    console.error('Failed to get or create Shows folder', e)
+    return undefined
+  }
+}
+
 export async function fetchItemDetailsWithTranscode(
   id: string,
   maxRetries = 10,
@@ -131,7 +186,7 @@ export async function fetchItemDetailsWithTranscode(
 
     // Pending/queued/empty → wait and retry
     if (attempt < maxRetries - 1) {
-      await new Promise((r) => setTimeout(r, 3000))
+      await new Promise((r) => setTimeout(r, 5000))
     }
   }
   return itemDetails(id)

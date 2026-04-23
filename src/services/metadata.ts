@@ -43,6 +43,23 @@ export async function searchTVBest(
     : imdb.searchTVBestIMDB(title, year, altTitle)
 }
 
+/** Direct TMDB search — returns raw paginated results for manual selection */
+export async function searchMovieRaw(query: string, year?: string) {
+  return isTMDB() ? tmdb.searchMovie(query, year) : { results: [] }
+}
+
+export async function searchTVRaw(query: string, year?: string) {
+  return isTMDB() ? tmdb.searchTV(query, year) : { results: [] }
+}
+
+export async function getMovieDetailByTmdbId(tmdbId: number): Promise<TMDBMovieDetail> {
+  return tmdb.movieDetail(tmdbId)
+}
+
+export async function getTVDetailByTmdbId(tmdbId: number): Promise<TMDBMovieDetail> {
+  return tmdb.tvDetail(tmdbId)
+}
+
 // ─── Detail (fetch by stored ID) ──────────────────────────────────────────────
 
 export async function getMovieDetailById(
