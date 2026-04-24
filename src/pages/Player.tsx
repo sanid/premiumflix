@@ -21,7 +21,6 @@ export function Player() {
   const navigate = useNavigate()
 
   const [playUrl, setPlayUrl] = useState<string | null>(null)
-  const [fallbackSrc, setFallbackSrc] = useState<Promise<string | null> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [file, setFile] = useState<MediaFile | null>(null)
@@ -82,11 +81,13 @@ export function Player() {
 
     // ── Playback URL strategy ──────────────────────────────────────────────
     //
-    // 1. stream_link cached from scan → already transcoded, play immediately.
-    // 2. directLink available → start playing immediately (Chrome/Firefox handle
-    //    MKV with H.264 natively). Fire off transcoding in background as fallback
-    //    so VideoPlayer can auto-switch if the browser rejects the format.
-    // 3. No cached URL → fetch from API; only blocks if MKV needs transcoding.
+    // Always prefer the transcoded HLS stream (stream_link) because it includes
+    // proper audio tracks and embedded subtitles from CDN77. Raw MKV direct links
+    // often have unsupported audio codecs and no subtitle extraction.
+    //
+    // 1. stream_link cached from scan → play immediately (best quality + subs).
+    // 2. No cached stream_link → fetch from Premiumize API (triggers transcode).
+    // 3. Fallback: directLink as last resort (may lack audio/subtitle support).
 
     if (f.streamLink) {
       setPlayUrl(f.streamLink)
@@ -94,28 +95,26 @@ export function Player() {
       return
     }
 
-    if (f.directLink) {
-      // Start playing immediately. Transcode in background as fallback
-      setPlayUrl(f.directLink)
-      setLoading(false)
-      const transcodeFallback = fetchItemDetailsWithTranscode(pmId)
-        .then((d) => d.stream_link ?? d.link ?? null)
-        .catch(() => null)
-      setFallbackSrc(transcodeFallback)
-      return
-    }
-
-    // No cached URL or MKV — must fetch transcoded stream.
-    const isMkv =
-      f.fileName.toLowerCase().endsWith('.mkv') || f.mimeType === 'video/x-matroska'
-
-    fetchItemDetailsWithTranscode(pmId, isMkv ? 20 : 3)
+    // Always fetch the transcoded HLS stream for best audio/subtitle support
+    fetchItemDetailsWithTranscode(pmId, 15)
       .then((d) => {
         const url = d.stream_link ?? d.link ?? null
-        if (url) setPlayUrl(url)
-        else setError('Could not get playback URL. The file may still be transcoding — try again in a few minutes.')
+        if (url) {
+          setPlayUrl(url)
+        } else if (f.directLink) {
+          // Last resort: try direct link (audio/subs may not work)
+          setPlayUrl(f.directLink)
+        } else {
+          setError('Could not get playback URL. The file may still be transcoding — try again in a few minutes.')
+        }
       })
-      .catch(() => setError('Failed to fetch playback URL.'))
+      .catch(() => {
+        if (f.directLink) {
+          setPlayUrl(f.directLink)
+        } else {
+          setError('Failed to fetch playback URL.')
+        }
+      })
       .finally(() => setLoading(false))
   }, [mediaId, fileId, mode, movies, tvShows])
 
@@ -158,7 +157,6 @@ export function Player() {
     <div className="fixed inset-0 bg-black">
       <VideoPlayer
         src={playUrl}
-        fallbackSrc={fallbackSrc}
         title={title}
         subtitle={subtitle}
         subtitles={file?.subtitles}

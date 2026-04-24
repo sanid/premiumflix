@@ -229,7 +229,28 @@ export function VideoPlayer({
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) tryFallback()
       })
-      // Populate audio track list once manifest is parsed
+      // Populate audio + subtitle tracks once manifest is parsed
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (hls.audioTracks.length > 0) {
+          const tracks = hls.audioTracks.map((t, i) => ({
+            id: i,
+            name: t.name ?? t.lang ?? `Track ${i + 1}`,
+            lang: t.lang ?? '',
+          }))
+          setAudioTracks(tracks)
+          setActiveAudioTrack(hls.audioTrack)
+        }
+        if (hls.subtitleTracks.length > 0) {
+          const tracks = hls.subtitleTracks.map((t, i) => ({
+            id: i,
+            name: t.name ?? t.lang ?? `Track ${i + 1}`,
+            lang: t.lang ?? '',
+          }))
+          setHlsSubTracks(tracks)
+          console.log('[Player] HLS subtitle tracks found:', tracks.length, tracks)
+        }
+      })
+      // Also handle late updates (some manifests update tracks after initial parse)
       hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
         const tracks = hls.audioTracks.map((t, i) => ({
           id: i,
@@ -242,7 +263,7 @@ export function VideoPlayer({
       hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => {
         setActiveAudioTrack(hls.audioTrack)
       })
-      // Embedded subtitle tracks (e.g. from transcoded MKV)
+      // Embedded subtitle tracks (e.g. from transcoded MKV via CDN77)
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
         const tracks = hls.subtitleTracks.map((t, i) => ({
           id: i,
@@ -251,9 +272,26 @@ export function VideoPlayer({
         }))
         setHlsSubTracks(tracks)
         setActiveHlsSub(hls.subtitleTrack)
+        console.log('[Player] HLS subtitle tracks updated:', tracks.length, tracks)
       })
       hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, () => {
         setActiveHlsSub(hls.subtitleTrack)
+        // Ensure the text track mode is set to 'showing' for active subtitle
+        if (hls.subtitleTrack >= 0) {
+          const ensureVisible = () => {
+            const v = videoRef.current
+            if (!v) return
+            for (let i = 0; i < v.textTracks.length; i++) {
+              const tt = v.textTracks[i]
+              if (tt.kind === 'subtitles' || tt.kind === 'captions') {
+                tt.mode = 'showing'
+              }
+            }
+          }
+          ensureVisible()
+          setTimeout(ensureVisible, 200)
+          setTimeout(ensureVisible, 1000)
+        }
       })
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // Safari native HLS
@@ -563,6 +601,7 @@ export function VideoPlayer({
         ref={videoRef}
         className="w-full h-full object-contain"
         playsInline
+        crossOrigin="anonymous"
         preload="auto"
         {...{ 'x-webkit-airplay': 'allow', 'webkit-playsinline': 'true' } as any}
       />
@@ -710,6 +749,13 @@ export function VideoPlayer({
                         onClick={() => {
                           setActiveSubtitle(null)
                           if (hlsRef.current) hlsRef.current.subtitleTrack = -1
+                          // Hide all text tracks on the video element
+                          const v = videoRef.current
+                          if (v) {
+                            for (let i = 0; i < v.textTracks.length; i++) {
+                              v.textTracks[i].mode = 'hidden'
+                            }
+                          }
                           setShowSubMenu(false)
                         }}
                         className={`w-full text-left px-4 py-2 text-sm transition-colors ${
@@ -725,6 +771,20 @@ export function VideoPlayer({
                           onClick={() => {
                             setActiveSubtitle(null) // disable external
                             if (hlsRef.current) hlsRef.current.subtitleTrack = track.id
+                            // Explicitly set text track mode to showing
+                            const ensureVisible = () => {
+                              const v = videoRef.current
+                              if (!v) return
+                              for (let i = 0; i < v.textTracks.length; i++) {
+                                const tt = v.textTracks[i]
+                                if (tt.kind === 'subtitles' || tt.kind === 'captions') {
+                                  tt.mode = 'showing'
+                                }
+                              }
+                            }
+                            ensureVisible()
+                            setTimeout(ensureVisible, 200)
+                            setTimeout(ensureVisible, 1000)
                             setShowSubMenu(false)
                           }}
                           className={`w-full text-left px-4 py-2 text-sm transition-colors ${
