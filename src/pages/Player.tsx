@@ -95,6 +95,12 @@ export function Player() {
     fetchItemDetailsWithTranscode(pmId, 20)
       .then((d) => {
         if (cancelled) return
+        console.log('[Player:page] API response:', {
+          stream_link: d.stream_link ? d.stream_link.substring(0, 80) + '...' : null,
+          link: d.link ? d.link.substring(0, 80) + '...' : null,
+          transcode_status: d.transcode_status,
+          name: d.name,
+        })
         const url = d.stream_link ?? d.link ?? null
         if (url) {
           setPlayUrl(url)

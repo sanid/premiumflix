@@ -70,6 +70,7 @@ export function VideoPlayer({
     }
 
     const isHLS = src.includes('.m3u8') || src.includes('stream_link') || src.includes('/stream/')
+    console.log('[Player] Loading source:', src.substring(0, 120) + '...', 'isHLS:', isHLS)
 
     if (isHLS && Hls.isSupported()) {
       const hls = new Hls({
@@ -89,7 +90,13 @@ export function VideoPlayer({
       })
 
       // Detect audio + subtitle tracks from manifest
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
+        console.log('[Player] Manifest parsed — levels:', data.levels.length,
+          'audio:', hls.audioTracks.length,
+          'subs:', hls.subtitleTracks.length)
+        if (data.levels.length > 0) {
+          console.log('[Player] Level details:', data.levels.map((l, i) => `${i}: ${l.width}x${l.height} ${l.codecSet}`))
+        }
         if (hls.audioTracks.length > 0) {
           const tracks = hls.audioTracks.map((t, i) => ({
             id: i,
@@ -470,6 +477,7 @@ export function VideoPlayer({
         ref={videoRef}
         className="w-full h-full object-contain"
         playsInline
+        crossOrigin="anonymous"
         preload="auto"
       />
 
