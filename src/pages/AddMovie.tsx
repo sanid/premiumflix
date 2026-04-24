@@ -30,6 +30,7 @@ export function AddMovie() {
   const [statusMsg, setStatusMsg] = useState<Record<string, string>>({})
   const [progress, setProgress] = useState<Record<string, number>>({})
   const pollingRef = useRef<Record<string, boolean>>({})
+  const peakProgressRef = useRef<Record<string, number>>({})
 
   // NZB filter / sort state
   const [nzbResFilter, setNzbResFilter] = useState<string>('all')
@@ -74,9 +75,12 @@ export function AddMovie() {
   }
 
   // Poll a Premiumize transfer for progress until it finishes or fails
+  // Detects two phases: downloading (from Usenet) → loading into cloud
   function pollTransferProgress(transferId: string, itemId: string) {
     if (pollingRef.current[itemId]) return
     pollingRef.current[itemId] = true
+    peakProgressRef.current[itemId] = 0
+    let phase: 'downloading' | 'loading' = 'downloading'
 
     const poll = async () => {
       while (pollingRef.current[itemId]) {
@@ -84,7 +88,6 @@ export function AddMovie() {
           const { transfers } = await listTransfers()
           const tr = transfers?.find(x => x.id === transferId)
           if (!tr) {
-            // Transfer disappeared — might already be done
             setStatus(prev => ({ ...prev, [itemId]: 'success' }))
             setStatusMsg(prev => ({ ...prev, [itemId]: 'Download complete' }))
             break
@@ -92,6 +95,13 @@ export function AddMovie() {
 
           const st = (tr.status ?? '').toLowerCase()
           const pct = Math.round((tr.progress ?? 0) * 100)
+          const peak = peakProgressRef.current[itemId] ?? 0
+
+          // Detect phase transition: download peaked then progress dropped
+          if (pct > peak) peakProgressRef.current[itemId] = pct
+          if (phase === 'downloading' && peak >= 90 && pct < peak * 0.5) {
+            phase = 'loading'
+          }
 
           setProgress(prev => ({ ...prev, [itemId]: pct }))
 
@@ -104,7 +114,8 @@ export function AddMovie() {
             setStatusMsg(prev => ({ ...prev, [itemId]: 'Download failed on Premiumize' }))
             break
           } else {
-            setStatusMsg(prev => ({ ...prev, [itemId]: `Downloading ${pct}%` }))
+            const label = phase === 'loading' ? `Loading into cloud ${pct}%` : `Downloading ${pct}%`
+            setStatusMsg(prev => ({ ...prev, [itemId]: label }))
           }
         } catch {
           // network hiccup — keep trying
