@@ -191,3 +191,18 @@ export async function fetchItemDetailsWithTranscode(
   }
   return itemDetails(id)
 }
+
+export async function getUploadInfo(folderId?: string): Promise<{ status: string; url: string; token: string }> {
+  const params: Record<string, string> = {}
+  if (folderId) params.id = folderId
+  return pmFetch<{ status: string; url: string; token: string }>('folder/uploadinfo', params)
+}
+
+/**
+ * Returns a direct download link for an item.
+ */
+export async function getDirectLink(itemId: string): Promise<string> {
+  const details = await itemDetails(itemId)
+  if (!details.link) throw new Error('No download link available for this item')
+  return details.link
+}

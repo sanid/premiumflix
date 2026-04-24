@@ -4,6 +4,7 @@ import { scanLibrary, type ScanProgress } from '../services/scanner'
 import { saveLibrary, loadLibrary, clearLibrary, appendMovie, appendTVShow, deleteMovie, deleteTVShow } from '../db'
 import { ingestItem } from '../services/autoIngest'
 import { listTransfers } from '../services/premiumize'
+import { syncLibraryToCloud, loadLibraryFromCloud } from '../services/cloudSync'
 
 interface LibraryContextValue {
   movies: Movie[]
@@ -23,6 +24,7 @@ interface LibraryContextValue {
   monitorTransfer: (transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show' }) => void
   notifications: string[]
   dismissNotification: (index: number) => void
+  restoreFromCloud: () => Promise<boolean>
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null)
@@ -51,6 +53,17 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       if (stored) setPendingTransfers(JSON.parse(stored))
     } catch {}
   }, [])
+
+  // Auto-sync to cloud when library changes (debounced)
+  useEffect(() => {
+    if (!initialized) return
+    const timer = setTimeout(() => {
+      syncLibraryToCloud(movies, tvShows).catch(() => {
+        // Silently fail or log, don't block UI
+      })
+    }, 30000) // Sync every 30s after changes
+    return () => clearTimeout(timer)
+  }, [movies, tvShows, initialized])
 
   // Poll pending transfers
   useEffect(() => {
@@ -202,6 +215,30 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     setTVShows(prev => prev.map(s => s.id === show.id ? show : s))
   }, [])
 
+  const restoreFromCloud = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const cloudLib = await loadLibraryFromCloud()
+      if (!cloudLib) {
+        setNotifications(prev => [...prev, '📭 No cloud backup found on Premiumize.'])
+        return false
+      }
+      
+      setMovies(cloudLib.movies)
+      setTVShows(cloudLib.tvShows)
+      await saveLibrary(cloudLib.movies, cloudLib.tvShows)
+      
+      setNotifications(prev => [...prev, '☁️ Library restored from cloud!'])
+      return true
+    } catch (e) {
+      console.error(e)
+      setNotifications(prev => [...prev, '❌ Failed to restore from cloud.'])
+      return false
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
   return (
     <LibraryContext.Provider
       value={{
@@ -222,6 +259,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
         monitorTransfer,
         notifications,
         dismissNotification,
+        restoreFromCloud,
       }}
     >
       {children}

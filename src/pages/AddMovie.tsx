@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { searchYTS, getMovieTorrents, generateMagnet } from '../services/yts'
 import type { YTSMovie, YTSTorrent } from '../services/yts'
 import { searchMovieNzb, searchShowNzb, type SceneNzbItem } from '../services/scenenzbs'
-import { createTransfer, getOrCreateMoviesFolder, getOrCreateShowsFolder } from '../services/premiumize'
+import { createTransfer, getOrCreateMoviesFolder, getOrCreateShowsFolder, listTransfers } from '../services/premiumize'
 import { ingestNewMovie } from '../services/ingest'
 import { useI18n } from '../contexts/I18nContext'
 import { useLibrary } from '../contexts/LibraryContext'
@@ -10,6 +10,7 @@ import { searchMovieRaw, searchTVRaw } from '../services/metadata'
 import type { TMDBMovieDetail } from '../types'
 
 type MediaTypeFilter = 'movie' | 'show'
+type SortDirection = 'asc' | 'desc'
 
 export function AddMovie() {
   const { t } = useI18n()
@@ -25,8 +26,95 @@ export function AddMovie() {
   const [selectedTmdbItem, setSelectedTmdbItem] = useState<TMDBMovieDetail | null>(null)
   const [torrents, setTorrents] = useState<YTSTorrent[]>([])
   const [loadingTorrents, setLoadingTorrents] = useState(false)
-  const [status, setStatus] = useState<Record<string, 'idle' | 'loading' | 'success' | 'error'>>({})
+  const [status, setStatus] = useState<Record<string, 'idle' | 'loading' | 'downloading' | 'success' | 'error'>>({})
   const [statusMsg, setStatusMsg] = useState<Record<string, string>>({})
+  const [progress, setProgress] = useState<Record<string, number>>({})
+  const pollingRef = useRef<Record<string, boolean>>({})
+
+  // NZB filter / sort state
+  const [nzbResFilter, setNzbResFilter] = useState<string>('all')
+  const [nzbLangFilter, setNzbLangFilter] = useState<string>('all')
+  const [nzbCodecFilter, setNzbCodecFilter] = useState<string>('all')
+  const [nzbSortSize, setNzbSortSize] = useState<SortDirection>('desc')
+
+  // Derived: unique filter values from NZB results
+  const { resolutions, languages, codecs } = useMemo(() => {
+    const res = new Set<string>()
+    const lang = new Set<string>()
+    const cod = new Set<string>()
+    nzbItems.forEach(item => {
+      if (item.resolution) res.add(item.resolution)
+      if (item.language) lang.add(item.language)
+      if (item.codec) cod.add(item.codec)
+    })
+    return {
+      resolutions: Array.from(res).sort((a, b) => {
+        const order = ['2160p', '1080p', '720p', '480p']
+        return order.indexOf(a) - order.indexOf(b)
+      }),
+      languages: Array.from(lang).sort(),
+      codecs: Array.from(cod).sort(),
+    }
+  }, [nzbItems])
+
+  const filteredNzbItems = useMemo(() => {
+    let items = nzbItems
+    if (nzbResFilter !== 'all') items = items.filter(i => i.resolution === nzbResFilter)
+    if (nzbLangFilter !== 'all') items = items.filter(i => i.language === nzbLangFilter)
+    if (nzbCodecFilter !== 'all') items = items.filter(i => i.codec === nzbCodecFilter)
+    items = [...items].sort((a, b) => nzbSortSize === 'desc' ? b.size - a.size : a.size - b.size)
+    return items
+  }, [nzbItems, nzbResFilter, nzbLangFilter, nzbCodecFilter, nzbSortSize])
+
+  function resetNzbFilters() {
+    setNzbResFilter('all')
+    setNzbLangFilter('all')
+    setNzbCodecFilter('all')
+    setNzbSortSize('desc')
+  }
+
+  // Poll a Premiumize transfer for progress until it finishes or fails
+  function pollTransferProgress(transferId: string, itemId: string) {
+    if (pollingRef.current[itemId]) return
+    pollingRef.current[itemId] = true
+
+    const poll = async () => {
+      while (pollingRef.current[itemId]) {
+        try {
+          const { transfers } = await listTransfers()
+          const tr = transfers?.find(x => x.id === transferId)
+          if (!tr) {
+            // Transfer disappeared — might already be done
+            setStatus(prev => ({ ...prev, [itemId]: 'success' }))
+            setStatusMsg(prev => ({ ...prev, [itemId]: 'Download complete' }))
+            break
+          }
+
+          const st = (tr.status ?? '').toLowerCase()
+          const pct = Math.round((tr.progress ?? 0) * 100)
+
+          setProgress(prev => ({ ...prev, [itemId]: pct }))
+
+          if (st === 'success' || st === 'finished' || st === 'seeding') {
+            setStatus(prev => ({ ...prev, [itemId]: 'success' }))
+            setStatusMsg(prev => ({ ...prev, [itemId]: 'Download complete' }))
+            break
+          } else if (st === 'error' || st === 'failed') {
+            setStatus(prev => ({ ...prev, [itemId]: 'error' }))
+            setStatusMsg(prev => ({ ...prev, [itemId]: 'Download failed on Premiumize' }))
+            break
+          } else {
+            setStatusMsg(prev => ({ ...prev, [itemId]: `Downloading ${pct}%` }))
+          }
+        } catch {
+          // network hiccup — keep trying
+        }
+        await new Promise(r => setTimeout(r, 3000))
+      }
+      delete pollingRef.current[itemId]
+    }
+    poll()
+  }
 
   useEffect(() => {
     fetchMedia(search, mediaType, source)
@@ -73,6 +161,7 @@ export function AddMovie() {
     setSelectedTmdbItem(item)
     setLoadingTorrents(true)
     setNzbItems([])
+    resetNzbFilters()
     try {
       const data = mediaType === 'movie' ? await searchMovieNzb(item.id) : await searchShowNzb(item.id)
       setNzbItems(data)
@@ -118,7 +207,11 @@ export function AddMovie() {
         folderId = await getOrCreateMoviesFolder()
       }
       const transfer = await createTransfer(magnet, folderId)
-      setStatusMsg(prev => ({ ...prev, [id]: 'Queued — waiting for download...' }))
+      setStatus(prev => ({ ...prev, [id]: 'downloading' }))
+      setStatusMsg(prev => ({ ...prev, [id]: 'Queued - waiting for download...' }))
+
+      // Poll for transfer progress
+      pollTransferProgress(transfer.id, id)
 
       if (mediaType === 'movie') {
         // Kick off background ingest — does NOT block the UI
@@ -131,7 +224,7 @@ export function AddMovie() {
           (ingestedMovie) => {
             appendMovieToLibrary(ingestedMovie)
             setStatus(prev => ({ ...prev, [id]: 'success' }))
-            setStatusMsg(prev => ({ ...prev, [id]: 'Added to library! Rescan to see it.' }))
+            setStatusMsg(prev => ({ ...prev, [id]: 'Added to library!' }))
           },
           (err) => {
             console.error('Ingest error:', err)
@@ -145,11 +238,6 @@ export function AddMovie() {
             language: movie.language,
           }
         )
-      } else {
-        // For TV shows we can't auto-ingest the same way (need episode structure)
-        // — the user should rescan after the download finishes
-        setStatus(prev => ({ ...prev, [id]: 'success' }))
-        setStatusMsg(prev => ({ ...prev, [id]: 'Sent to Premiumize! Rescan library once download finishes.' }))
       }
     } catch (e) {
       console.error(e)
@@ -170,16 +258,18 @@ export function AddMovie() {
         folderId = await getOrCreateMoviesFolder()
       }
       const transfer = await createTransfer(item.link, folderId)
-      setStatusMsg(prev => ({ ...prev, [id]: 'Queued — waiting for download...' }))
-      setStatus(prev => ({ ...prev, [id]: 'success' }))
-      
-      // Monitor this transfer globally
+      setStatus(prev => ({ ...prev, [id]: 'downloading' }))
+      setStatusMsg(prev => ({ ...prev, [id]: 'Queued - waiting for download...' }))
+
+      // Poll for transfer progress
+      pollTransferProgress(transfer.id, id)
+
+      // Monitor this transfer globally for notifications
       if (selectedTmdbItem) {
         monitorTransfer(transfer.id, item.title, { tmdbId: selectedTmdbItem.id, type: mediaType as 'movie' | 'show' })
       } else {
         monitorTransfer(transfer.id, item.title)
       }
-      
     } catch (e) {
       console.error(e)
       setStatus(prev => ({ ...prev, [id]: 'error' }))
@@ -376,6 +466,7 @@ export function AddMovie() {
                           {torrents.map(tData => {
                             const id = `${selectedMovie!.id}-${tData.hash}`
                             const s = status[id] ?? 'idle'
+                            const pct = progress[id] ?? 0
                             return (
                               <div key={tData.hash} className="bg-black/40 border border-white/10 rounded-lg p-4 flex flex-col">
                                 <div className="flex justify-between items-start mb-3">
@@ -390,60 +481,224 @@ export function AddMovie() {
                                     <span className="text-red-400 font-medium">{tData.peers}</span> {t.addMovie.peers}
                                   </span>
                                 </div>
+
+                                {/* Progress bar for downloading state */}
+                                {s === 'downloading' && (
+                                  <div className="mb-3">
+                                    <div className="flex justify-between text-[10px] text-premiumflix-muted mb-1">
+                                      <span>{statusMsg[id] ?? 'Downloading...'}</span>
+                                      <span>{pct}%</span>
+                                    </div>
+                                    <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-premiumflix-red rounded-full transition-all duration-500 ease-out"
+                                        style={{ width: `${pct}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+
                                 <button
                                   onClick={() => handleAddTorrent(tData, selectedMovie!)}
-                                  disabled={s === 'loading' || s === 'success'}
+                                  disabled={s === 'loading' || s === 'downloading' || s === 'success'}
                                   className={`mt-auto w-full py-2.5 rounded font-bold transition-all text-sm ${
                                     s === 'success' ? 'bg-green-600 text-white' :
                                     s === 'error' ? 'bg-red-600 text-white cursor-pointer' :
                                     s === 'loading' ? 'bg-white/20 text-white/60' :
+                                    s === 'downloading' ? 'bg-white/10 text-white/50 cursor-wait' :
                                     'bg-premiumflix-red hover:bg-premiumflix-red-hover text-white hover:scale-[1.02]'
                                   }`}
                                 >
-                                  {s === 'loading' || s === 'success'
-                                    ? (statusMsg[id] || (s === 'loading' ? t.addMovie.adding : t.addMovie.added))
-                                    : s === 'error'
-                                      ? (statusMsg[id] || t.addMovie.failed)
-                                      : t.addMovie.add}
+                                  {s === 'loading' ? (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full" />
+                                      Sending...
+                                    </span>
+                                  ) : s === 'downloading' ? (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full" />
+                                      {pct}%
+                                    </span>
+                                  ) : s === 'success' ? (
+                                    statusMsg[id] || t.addMovie.added
+                                  ) : s === 'error' ? (
+                                    statusMsg[id] || t.addMovie.failed
+                                  ) : t.addMovie.add}
                                 </button>
                               </div>
                             )
                           })}
                         </div>
                       ) : (
-                        nzbItems.map(item => {
-                          const id = item.guid
-                          const s = status[id] ?? 'idle'
-                          return (
-                            <div key={item.guid} className="bg-black/40 border border-white/10 rounded-lg p-4 flex flex-col md:flex-row gap-4 items-start md:items-center">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <h3 className="text-white font-bold text-sm break-words leading-tight">{item.title}</h3>
-                                </div>
-                                <div className="flex gap-2 flex-wrap text-[10px] mt-1">
-                                  {item.resolution && <span className="bg-premiumflix-red text-white px-1 rounded font-bold">{item.resolution}</span>}
-                                  {item.codec && <span className="bg-white/20 text-white px-1 rounded">{item.codec}</span>}
-                                  {item.language && <span className="text-premiumflix-muted">{item.language}</span>}
-                                  {item.size > 0 && <span className="text-premiumflix-muted">{(item.size / 1024 / 1024 / 1024).toFixed(2)} GB</span>}
-                                </div>
+                        <>
+                          {/* ── NZB Filter & Sort Bar ── */}
+                          {nzbItems.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b border-white/10">
+                              {/* Resolution filter */}
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="text-[10px] uppercase tracking-wider text-premiumflix-muted font-bold mr-1">Resolution</span>
+                                <FilterPill active={nzbResFilter === 'all'} onClick={() => setNzbResFilter('all')}>All</FilterPill>
+                                {resolutions.map(r => (
+                                  <FilterPill key={r} active={nzbResFilter === r} onClick={() => setNzbResFilter(r)}>{r}</FilterPill>
+                                ))}
                               </div>
-                              <div className="flex-shrink-0">
-                                <button 
+
+                              <span className="text-white/10 hidden sm:inline">|</span>
+
+                              {/* Language filter */}
+                              {languages.length > 1 && (
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <span className="text-[10px] uppercase tracking-wider text-premiumflix-muted font-bold mr-1">Language</span>
+                                  <FilterPill active={nzbLangFilter === 'all'} onClick={() => setNzbLangFilter('all')}>All</FilterPill>
+                                  {languages.map(l => (
+                                    <FilterPill key={l} active={nzbLangFilter === l} onClick={() => setNzbLangFilter(l)}>{l}</FilterPill>
+                                  ))}
+                                </div>
+                              )}
+
+                              <span className="text-white/10 hidden sm:inline">|</span>
+
+                              {/* Codec filter */}
+                              {codecs.length > 1 && (
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <span className="text-[10px] uppercase tracking-wider text-premiumflix-muted font-bold mr-1">Codec</span>
+                                  <FilterPill active={nzbCodecFilter === 'all'} onClick={() => setNzbCodecFilter('all')}>All</FilterPill>
+                                  {codecs.map(c => (
+                                    <FilterPill key={c} active={nzbCodecFilter === c} onClick={() => setNzbCodecFilter(c)}>{c}</FilterPill>
+                                  ))}
+                                </div>
+                              )}
+
+                              <span className="text-white/10 hidden sm:inline">|</span>
+
+                              {/* Size sort */}
+                              <button
+                                onClick={() => setNzbSortSize(d => d === 'desc' ? 'asc' : 'desc')}
+                                className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-premiumflix-muted font-bold hover:text-white transition-colors"
+                              >
+                                <svg className={`w-3.5 h-3.5 transition-transform ${nzbSortSize === 'asc' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                                Size {nzbSortSize === 'desc' ? '↓' : '↑'}
+                              </button>
+
+                              {/* Results count */}
+                              <span className="ml-auto text-[10px] text-premiumflix-muted">
+                                {filteredNzbItems.length}{filteredNzbItems.length !== nzbItems.length ? ` / ${nzbItems.length}` : ''} releases
+                              </span>
+                            </div>
+                          )}
+
+                          {/* ── NZB Results ── */}
+                          {filteredNzbItems.length === 0 && nzbItems.length > 0 ? (
+                            <div className="flex flex-col items-center justify-center py-10 text-center">
+                              <svg className="w-10 h-10 text-white/20 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                              </svg>
+                              <p className="text-premiumflix-muted text-sm">No releases match your filters.</p>
+                              <button onClick={resetNzbFilters} className="text-premiumflix-red text-xs font-bold mt-2 hover:underline">Reset filters</button>
+                            </div>
+                          ) : filteredNzbItems.map(item => {
+                            const id = item.guid
+                            const s = status[id] ?? 'idle'
+                            const pct = progress[id] ?? 0
+                            const sizeGB = item.size > 0 ? (item.size / 1024 / 1024 / 1024).toFixed(1) : null
+                            return (
+                              <div
+                                key={item.guid}
+                                className={`group relative bg-black/40 border rounded-xl p-4 transition-all hover:bg-white/[0.06] ${
+                                  s === 'success' ? 'border-green-500/30 bg-green-900/10' :
+                                  s === 'downloading' ? 'border-blue-500/20' :
+                                  s === 'error' ? 'border-red-500/30 bg-red-900/10' :
+                                  'border-white/10'
+                                }`}
+                              >
+                                {/* Title row */}
+                                <h3 className="text-white font-semibold text-sm break-words leading-snug mb-2">{item.title}</h3>
+
+                                {/* Metadata badges */}
+                                <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                                  {item.resolution && (
+                                    <ResolutionBadge resolution={item.resolution} />
+                                  )}
+                                  {item.codec && (
+                                    <span className="inline-flex items-center gap-1 bg-white/15 text-white text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                      {item.codec.toUpperCase()}
+                                    </span>
+                                  )}
+                                  {item.language && (
+                                    <span className="inline-flex items-center gap-1 bg-blue-900/50 text-blue-300 text-[10px] font-medium px-2 py-0.5 rounded-md">
+                                      🌐 {item.language}
+                                    </span>
+                                  )}
+                                  {item.subs && (
+                                    <span className="inline-flex items-center gap-1 bg-purple-900/40 text-purple-300 text-[10px] font-medium px-2 py-0.5 rounded-md">
+                                      💬 {item.subs}
+                                    </span>
+                                  )}
+                                  {sizeGB && (
+                                    <span className="inline-flex items-center gap-1 bg-amber-900/40 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                      📦 {sizeGB} GB
+                                    </span>
+                                  )}
+                                  {mediaType === 'show' && item.season != null && (
+                                    <span className="inline-flex items-center bg-emerald-900/40 text-emerald-300 text-[10px] font-medium px-2 py-0.5 rounded-md">
+                                      S{String(item.season).padStart(2,'0')}{item.episode != null ? `E${String(item.episode).padStart(2,'0')}` : ''}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Progress bar */}
+                                {(s === 'loading' || s === 'downloading') && (
+                                  <div className="mb-3">
+                                    <div className="flex justify-between text-[10px] text-premiumflix-muted mb-1">
+                                      <span>{statusMsg[id] ?? 'Processing...'}</span>
+                                      {s === 'downloading' && <span>{pct}%</span>}
+                                    </div>
+                                    <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full transition-all duration-500 ease-out ${
+                                          s === 'loading' ? 'bg-white/30 w-full animate-pulse' : 'bg-premiumflix-red'
+                                        }`}
+                                        style={s === 'downloading' ? { width: `${pct}%` } : undefined}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Add button */}
+                                <button
                                   onClick={() => handleAddNzb(item)}
-                                  disabled={s === 'loading' || s === 'success'}
-                                  className={`px-4 py-2 rounded text-xs font-bold transition-colors ${
-                                    s === 'success' ? 'bg-green-700 text-white' :
-                                    s === 'error' ? 'bg-red-700 text-white' :
-                                    s === 'loading' ? 'bg-white/10 text-white/50' :
-                                    'bg-premiumflix-red hover:bg-premiumflix-red-hover text-white'
+                                  disabled={s === 'loading' || s === 'downloading' || s === 'success'}
+                                  className={`w-full sm:w-auto px-5 py-2 rounded-lg text-xs font-bold transition-all ${
+                                    s === 'success' ? 'bg-green-600 text-white cursor-default' :
+                                    s === 'downloading' ? 'bg-white/10 text-white/50 cursor-wait' :
+                                    s === 'error' ? 'bg-red-600 text-white hover:bg-red-500' :
+                                    s === 'loading' ? 'bg-white/10 text-white/50 cursor-wait' :
+                                    'bg-premiumflix-red hover:bg-premiumflix-red-hover text-white hover:scale-[1.02] active:scale-[0.98]'
                                   }`}
                                 >
-                                  {s === 'loading' ? 'Adding...' : s === 'success' ? 'Added ✓' : s === 'error' ? 'Failed' : 'Add NZB'}
+                                  {s === 'loading' ? (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full" />
+                                      Sending...
+                                    </span>
+                                  ) : s === 'downloading' ? (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full" />
+                                      {pct}%
+                                    </span>
+                                  ) : s === 'success' ? (
+                                    <span className="inline-flex items-center gap-1">
+                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                      Download complete
+                                    </span>
+                                  ) : s === 'error' ? '✗ Retry' : '+ Add NZB'}
                                 </button>
                               </div>
-                            </div>
-                          )
-                        })
+                            )
+                          })}
+                        </>
                       )}
                     </div>
                   )}
@@ -454,5 +709,35 @@ export function AddMovie() {
         )}
       </div>
     </div>
+  )
+}
+
+/* ── Small helper components ── */
+
+function FilterPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-2.5 py-1 text-[11px] font-semibold rounded-full transition-colors ${
+        active
+          ? 'bg-white text-black'
+          : 'bg-white/10 text-premiumflix-muted hover:bg-white/20 hover:text-white'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ResolutionBadge({ resolution }: { resolution: string }) {
+  const color =
+    resolution === '2160p' ? 'bg-violet-600/80 text-white' :
+    resolution === '1080p' ? 'bg-premiumflix-red/80 text-white' :
+    resolution === '720p'  ? 'bg-orange-600/70 text-white' :
+    'bg-white/20 text-white'
+  return (
+    <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${color}`}>
+      {resolution === '2160p' ? '4K' : resolution}
+    </span>
   )
 }

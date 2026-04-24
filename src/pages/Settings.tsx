@@ -8,7 +8,7 @@ import type { ScanFolderSelection, PMItem } from '../types'
 import { useI18n } from '../contexts/I18nContext'
 
 export function Settings() {
-  const { scan, clearAndRescan, isLoading, movies, tvShows } = useLibrary()
+  const { scan, clearAndRescan, isLoading, movies, tvShows, restoreFromCloud } = useLibrary()
   const { t } = useI18n()
   const navigate = useNavigate()
 
@@ -336,6 +336,29 @@ export function Settings() {
             </button>
           )}
         </div>
+
+        {/* Cloud Sync */}
+        <Section title="Cloud Backup">
+          <p className="text-premiumflix-muted text-sm mb-4 leading-relaxed">
+            Your library metadata is automatically backed up to your Premiumize cloud as <code className="bg-white/10 px-1 rounded">premiumflix_library.json</code>.
+            This allows you to instantly load your library on other devices without scanning.
+          </p>
+          <div className="bg-premiumflix-surface border border-white/10 rounded-lg p-4">
+            <button
+              onClick={restoreFromCloud}
+              disabled={isLoading}
+              className="w-full bg-white text-black font-bold py-2.5 rounded hover:bg-white/80 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+              </svg>
+              {isLoading ? 'Processing...' : 'Restore Library from Cloud'}
+            </button>
+            <p className="text-premiumflix-muted/60 text-xs mt-3 text-center">
+              Last backup: {movies.length > 0 || tvShows.length > 0 ? 'Automatic' : 'None'}
+            </p>
+          </div>
+        </Section>
 
         {/* Library management */}
         <Section title={t.settings.library}>
