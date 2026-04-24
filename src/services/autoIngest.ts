@@ -43,11 +43,120 @@ export async function ingestItem(itemId: string, typeHint?: 'movie' | 'show'): P
   }
 }
 
+const VIDEO_EXTS = ['mkv', 'mp4', 'avi', 'm4v', 'mov', 'wmv', 'ts', 'flv', 'webm', 'mpg', 'mpeg']
+
+function isVideoFile(name: string, mime?: string | null): boolean {
+  if (mime?.startsWith('video/')) return true
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return VIDEO_EXTS.includes(ext)
+}
+
+/**
+ * Find a video file in a Premiumize item, retrying if the folder is empty
+ * (Premiumize may need a moment to populate the folder after download).
+ */
+async function findVideoFile(itemId: string, retries = 5): Promise<{ file: MediaFile; pmItem: PMItem } | null> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const item = await itemDetails(itemId)
+      const itemType = (item.type ?? '').toLowerCase()
+
+      // If it's a file (not a folder), check if it's a video directly
+      if (itemType !== 'folder' && item.name && isVideoFile(item.name, item.mime_type)) {
+        return {
+          pmItem: item as PMItem,
+          file: {
+            id: item.id ?? itemId,
+            name: item.name,
+            fileName: item.name,
+            size: item.size ?? 0,
+            mimeType: item.mime_type,
+            streamLink: item.stream_link,
+            directLink: item.link,
+            duration: item.duration,
+            resolution: (item.resx && item.resy) ? `${item.resx}x${item.resy}` : undefined,
+            videoCodec: item.vcodec,
+            audioCodec: item.acodec,
+            premiumizeId: item.id ?? itemId,
+          },
+        }
+      }
+
+      // It's a folder — list contents
+      const folderData = await listFolder(itemId)
+      const contents = folderData.content ?? []
+
+      if (contents.length === 0) {
+        // Folder not populated yet — wait and retry
+        if (attempt < retries - 1) {
+          console.log(`ingestEpisode: folder empty, retrying (${attempt + 1}/${retries})...`)
+          await new Promise(r => setTimeout(r, 3000))
+          continue
+        }
+        return null
+      }
+
+      const video = contents.find(f => isVideoFile(f.name, f.mime_type))
+      if (video) {
+        return {
+          pmItem: video,
+          file: {
+            id: video.id,
+            name: video.name,
+            fileName: video.name,
+            size: video.size ?? 0,
+            mimeType: video.mime_type,
+            streamLink: video.stream_link,
+            directLink: video.link,
+            duration: video.duration,
+            resolution: (video.resx && video.resy) ? `${video.resx}x${video.resy}` : undefined,
+            videoCodec: video.vcodec,
+            audioCodec: video.acodec,
+            premiumizeId: video.id,
+          },
+        }
+      }
+
+      // No video found — check subfolders (single level)
+      for (const sub of contents.filter(c => c.type === 'folder')) {
+        const subData = await listFolder(sub.id)
+        const subVideo = (subData.content ?? []).find(f => isVideoFile(f.name, f.mime_type))
+        if (subVideo) {
+          return {
+            pmItem: subVideo,
+            file: {
+              id: subVideo.id,
+              name: subVideo.name,
+              fileName: subVideo.name,
+              size: subVideo.size ?? 0,
+              mimeType: subVideo.mime_type,
+              streamLink: subVideo.stream_link,
+              directLink: subVideo.link,
+              duration: subVideo.duration,
+              resolution: (subVideo.resx && subVideo.resy) ? `${subVideo.resx}x${subVideo.resy}` : undefined,
+              videoCodec: subVideo.vcodec,
+              audioCodec: subVideo.acodec,
+              premiumizeId: subVideo.id,
+            },
+          }
+        }
+      }
+
+      // No video at all
+      return null
+    } catch (e) {
+      console.warn(`ingestEpisode: attempt ${attempt + 1} failed`, e)
+      if (attempt < retries - 1) {
+        await new Promise(r => setTimeout(r, 3000))
+      }
+    }
+  }
+  return null
+}
+
 /**
  * Ingest a single TV episode transfer and merge it into an existing show,
  * or create a new stub show if one doesn't exist yet.
- * 
- * This is used when users add individual episode NZBs from SceneNZBs.
  */
 export async function ingestEpisode(
   itemId: string,
@@ -55,64 +164,23 @@ export async function ingestEpisode(
   seasonNum?: number,
   episodeNum?: number,
 ): Promise<{ show: TVShow; isNew: boolean } | null> {
+  console.log('ingestEpisode called:', { itemId, tmdbId, seasonNum, episodeNum })
+
   try {
-    // 1. Get the downloaded file details from Premiumize
-    let mediaFile: MediaFile | null = null
-    const item = await itemDetails(itemId)
-
-    if (item.type === 'folder') {
-      // Folder transfer — list contents and pick first video
-      const folderData = await listFolder(itemId)
-      const video = (folderData.content ?? []).find(f => {
-        if (f.mime_type?.startsWith('video/')) return true
-        const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
-        return ['mkv', 'mp4', 'avi', 'm4v', 'mov', 'wmv', 'ts', 'webm'].includes(ext)
-      })
-      if (video) {
-        mediaFile = {
-          id: video.id,
-          name: video.name,
-          fileName: video.name,
-          size: video.size ?? 0,
-          mimeType: video.mime_type,
-          streamLink: video.stream_link,
-          directLink: video.link,
-          duration: video.duration,
-          resolution: (item.resx && item.resy) ? `${item.resx}x${item.resy}` : undefined,
-          videoCodec: video.vcodec,
-          audioCodec: video.acodec,
-          premiumizeId: video.id,
-          seasonNumber: seasonNum,
-          episodeNumber: episodeNum,
-        }
-      }
-    } else {
-      // Single file transfer
-      mediaFile = {
-        id: item.id ?? itemId,
-        name: item.name ?? 'Unknown',
-        fileName: item.name ?? 'Unknown',
-        size: item.size ?? 0,
-        mimeType: item.mime_type,
-        streamLink: item.stream_link,
-        directLink: item.link,
-        duration: item.duration,
-        resolution: (item.resx && item.resy) ? `${item.resx}x${item.resy}` : undefined,
-        videoCodec: item.vcodec,
-        audioCodec: item.acodec,
-        premiumizeId: item.id ?? itemId,
-        seasonNumber: seasonNum,
-        episodeNumber: episodeNum,
-      }
-    }
-
-    if (!mediaFile) {
+    // 1. Find the video file (with retries for empty folders)
+    const result = await findVideoFile(itemId)
+    if (!result) {
       console.error('ingestEpisode: no video file found for', itemId)
       return null
     }
 
+    const mediaFile = result.file
     const sn = seasonNum ?? 1
     const en = episodeNum ?? 1
+    mediaFile.seasonNumber = sn
+    mediaFile.episodeNumber = en
+
+    console.log('ingestEpisode: found video', mediaFile.fileName, `S${sn}E${en}`)
 
     // 2. Look for an existing show in the library with this tmdbId
     const existingShows = await db.tvShows.toArray()
@@ -120,8 +188,15 @@ export async function ingestEpisode(
     let isNew = false
 
     if (!show) {
+      console.log('ingestEpisode: no existing show for tmdbId', tmdbId, '- creating new')
       // 3. Create a new stub show with TMDB metadata
-      const detail = await tmdbTVDetail(tmdbId)
+      let detail = null
+      try {
+        detail = await tmdbTVDetail(tmdbId)
+      } catch (e) {
+        console.error('ingestEpisode: failed to fetch TMDB detail', e)
+      }
+
       const showTitle = detail?.name ?? detail?.title ?? 'Unknown Show'
       const showYear = detail?.first_air_date?.slice(0, 4)
 
@@ -131,7 +206,7 @@ export async function ingestEpisode(
         year: showYear,
         seasons: [],
         tmdbId,
-        tmdbDetail: detail,
+        tmdbDetail: detail ?? undefined,
       }
 
       // Fetch logo + trailer
@@ -147,6 +222,8 @@ export async function ingestEpisode(
       }
 
       isNew = true
+    } else {
+      console.log('ingestEpisode: found existing show', show.title, 'with', show.seasons.length, 'seasons')
     }
 
     // 4. Add the episode to the correct season
@@ -164,6 +241,9 @@ export async function ingestEpisode(
       if (!existingEp) {
         show.seasons[seasonIdx].episodes.push(episode)
         show.seasons[seasonIdx].episodes.sort((a, b) => a.number - b.number)
+        console.log(`ingestEpisode: added S${sn}E${en} to existing season (${show.seasons[seasonIdx].episodes.length} eps)`)
+      } else {
+        console.log(`ingestEpisode: S${sn}E${en} already exists, skipping`)
       }
     } else {
       // Create new season
@@ -175,6 +255,7 @@ export async function ingestEpisode(
       }
       show.seasons.push(season)
       show.seasons.sort((a, b) => a.number - b.number)
+      console.log(`ingestEpisode: created Season ${sn} with E${en}`)
     }
 
     // 5. Try to fetch TMDB episode metadata
@@ -196,14 +277,18 @@ export async function ingestEpisode(
             }
           }
         }
-      } catch {}
+      } catch (e) {
+        console.warn('ingestEpisode: failed to fetch season detail', e)
+      }
     }
 
     // 6. Save to DB
     if (isNew) {
       await db.tvShows.add(show)
+      console.log('ingestEpisode: saved new show to DB')
     } else {
-      await db.tvShows.update(show.id, { seasons: show.seasons })
+      await db.tvShows.update(show.id, show)
+      console.log('ingestEpisode: updated show in DB')
     }
 
     return { show, isNew }

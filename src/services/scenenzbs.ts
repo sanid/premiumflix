@@ -76,6 +76,15 @@ export async function searchSceneNzbs(params: Record<string, string>): Promise<S
 
     const { resolution, codec } = parseTitleInfo(item.title)
 
+    // Fallback: parse season/episode from title if API didn't provide them
+    if (season == null || episode == null) {
+      const seMatch = item.title.match(/[Ss](\d{1,2})[Ee](\d{1,3})/)
+      if (seMatch) {
+        if (season == null) season = parseInt(seMatch[1], 10)
+        if (episode == null) episode = parseInt(seMatch[2], 10)
+      }
+    }
+
     return {
       title: item.title,
       guid: item.guid,
