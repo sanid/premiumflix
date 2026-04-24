@@ -169,24 +169,48 @@ export function VideoPlayer({
 
   // ─── Subtitle visibility enforcement ────────────────────────────────────────
   //
-  // HLS subtitle cues need the textTrack.mode set to 'showing' after the
-  // track is loaded. We poll for this because the track may load late.
+  // hls.js creates textTrack elements for each subtitle track, but doesn't
+  // always set the mode to 'showing'. We need to:
+  // - Show ONLY the active track
+  // - Hide all other subtitle tracks
+  // - Poll because tracks load asynchronously
 
   useEffect(() => {
-    if (activeHlsSub < 0 && !activeSubtitle) return
-
     const interval = setInterval(() => {
       const video = videoRef.current
       if (!video) return
+
+      const wantSubs = activeHlsSub >= 0 || activeSubtitle
+
       for (let i = 0; i < video.textTracks.length; i++) {
         const tt = video.textTracks[i]
-        if (tt.kind === 'subtitles' || tt.kind === 'captions') {
-          if (activeHlsSub >= 0 || activeSubtitle) {
+        if (tt.kind !== 'subtitles' && tt.kind !== 'captions') continue
+
+        if (!wantSubs) {
+          // Subtitles are OFF — hide everything
+          if (tt.mode !== 'hidden') tt.mode = 'hidden'
+        } else if (activeHlsSub >= 0) {
+          // HLS subtitle mode — show only the track matching our active index
+          // hls.js sets the id/label based on the track index
+          // The active track should be 'showing', all others 'hidden'
+          const trackIndex = hlsSubTracks.findIndex(
+            (t) => t.name === tt.label || t.lang === tt.language
+          )
+          const isActive = trackIndex === activeHlsSub
+          if (isActive && tt.mode !== 'showing') {
+            console.log('[Player] Showing subtitle track:', tt.label, tt.language)
             tt.mode = 'showing'
+          } else if (!isActive && tt.mode === 'showing') {
+            tt.mode = 'hidden'
           }
+        } else if (activeSubtitle) {
+          // External subtitle mode — show only the matching label
+          const isActive = tt.label === subtitles?.find((s) => s.id === activeSubtitle)?.label
+          if (isActive && tt.mode !== 'showing') tt.mode = 'showing'
+          else if (!isActive && tt.mode === 'showing') tt.mode = 'hidden'
         }
       }
-    }, 500)
+    }, 300)
 
     return () => clearInterval(interval)
   }, [activeHlsSub, activeSubtitle])
@@ -618,14 +642,16 @@ export function VideoPlayer({
                       <button
                         onClick={() => {
                           setActiveSubtitle(null)
+                          setActiveHlsSub(-1)
                           if (hlsRef.current) hlsRef.current.subtitleTrack = -1
                           const v = videoRef.current
                           if (v) {
                             for (let i = 0; i < v.textTracks.length; i++) {
-                              v.textTracks[i].mode = 'hidden'
+                              if (v.textTracks[i].kind === 'subtitles' || v.textTracks[i].kind === 'captions') {
+                                v.textTracks[i].mode = 'hidden'
+                              }
                             }
                           }
-                          setActiveHlsSub(-1)
                           setShowSubMenu(false)
                         }}
                         className={`w-full text-left px-4 py-2 text-sm transition-colors ${
