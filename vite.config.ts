@@ -56,6 +56,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'hls': ['hls.js'],
           'dexie': ['dexie'],
         }
       }
