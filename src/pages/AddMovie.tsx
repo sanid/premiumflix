@@ -4,6 +4,7 @@ import type { YTSMovie, YTSTorrent } from '../services/yts'
 import { searchMovieNzb, searchShowNzb, type SceneNzbItem } from '../services/scenenzbs'
 import { createTransfer, getOrCreateMoviesFolder, getOrCreateShowsFolder, listTransfers } from '../services/premiumize'
 import { ingestNewMovie } from '../services/ingest'
+import { ingestEpisode } from '../services/autoIngest'
 import { useI18n } from '../contexts/I18nContext'
 import { useLibrary } from '../contexts/LibraryContext'
 import { searchMovieRaw, searchTVRaw } from '../services/metadata'
@@ -14,7 +15,7 @@ type SortDirection = 'asc' | 'desc'
 
 export function AddMovie() {
   const { t } = useI18n()
-  const { appendMovieToLibrary, monitorTransfer } = useLibrary()
+  const { appendMovieToLibrary, appendShowToLibrary, updateShowInLibrary, monitorTransfer } = useLibrary()
   const [search, setSearch] = useState('')
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('movie')
   const [source, setSource] = useState<'yts' | 'usenet'>('yts')
@@ -75,8 +76,13 @@ export function AddMovie() {
   }
 
   // Poll a Premiumize transfer for progress until it finishes or fails
-  // Detects two phases: downloading (from Usenet) → loading into cloud
-  function pollTransferProgress(transferId: string, itemId: string) {
+  // Detects two phases: downloading (from Usenet) -> loading into cloud
+  // Triggers episode ingestion when a show transfer completes
+  function pollTransferProgress(
+    transferId: string,
+    itemId: string,
+    meta?: { tmdbId?: number; type?: 'movie' | 'show'; season?: number; episode?: number },
+  ) {
     if (pollingRef.current[itemId]) return
     pollingRef.current[itemId] = true
     peakProgressRef.current[itemId] = 0
@@ -108,6 +114,25 @@ export function AddMovie() {
           if (st === 'success' || st === 'finished' || st === 'seeding') {
             setStatus(prev => ({ ...prev, [itemId]: 'success' }))
             setStatusMsg(prev => ({ ...prev, [itemId]: 'Download complete' }))
+
+            // Auto-ingest the completed transfer
+            const resultItemId = tr.folder_id || tr.file_id
+            if (resultItemId && meta?.tmdbId && meta?.type === 'show') {
+              setStatusMsg(prev => ({ ...prev, [itemId]: 'Adding to show library...' }))
+              try {
+                const result = await ingestEpisode(resultItemId, meta.tmdbId!, meta.season, meta.episode)
+                if (result) {
+                  if (result.isNew) {
+                    appendShowToLibrary(result.show)
+                  } else {
+                    updateShowInLibrary(result.show)
+                  }
+                  setStatusMsg(prev => ({ ...prev, [itemId]: `Added to ${result.show.title}` }))
+                }
+              } catch (err) {
+                console.error('Episode ingest failed', err)
+              }
+            }
             break
           } else if (st === 'error' || st === 'failed') {
             setStatus(prev => ({ ...prev, [itemId]: 'error' }))
@@ -118,7 +143,7 @@ export function AddMovie() {
             setStatusMsg(prev => ({ ...prev, [itemId]: label }))
           }
         } catch {
-          // network hiccup — keep trying
+          // network hiccup - keep trying
         }
         await new Promise(r => setTimeout(r, 3000))
       }
@@ -222,7 +247,10 @@ export function AddMovie() {
       setStatusMsg(prev => ({ ...prev, [id]: 'Queued - waiting for download...' }))
 
       // Poll for transfer progress
-      pollTransferProgress(transfer.id, id)
+      pollTransferProgress(transfer.id, id, {
+        tmdbId: selectedTmdbItem?.id,
+        type: mediaType as 'movie' | 'show',
+      })
 
       if (mediaType === 'movie') {
         // Kick off background ingest — does NOT block the UI
@@ -272,10 +300,15 @@ export function AddMovie() {
       setStatus(prev => ({ ...prev, [id]: 'downloading' }))
       setStatusMsg(prev => ({ ...prev, [id]: 'Queued - waiting for download...' }))
 
-      // Poll for transfer progress
-      pollTransferProgress(transfer.id, id)
+      // Poll for transfer progress + auto-ingest
+      pollTransferProgress(transfer.id, id, {
+        tmdbId: selectedTmdbItem?.id,
+        type: mediaType as 'movie' | 'show',
+        season: item.season,
+        episode: item.episode,
+      })
 
-      // Monitor this transfer globally for notifications + episode merging
+      // Monitor this transfer globally for notifications
       if (selectedTmdbItem) {
         monitorTransfer(transfer.id, item.title, {
           tmdbId: selectedTmdbItem.id,
