@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import Hls from 'hls.js'
 import type { SubtitleTrack } from '../types'
+import type { PMSubtitle } from '../services/premiumize'
 
 interface VideoPlayerProps {
   src: string
   title: string
   subtitle?: string
   subtitles?: SubtitleTrack[]
+  openSubtitles?: PMSubtitle[]
   initialPosition?: number
   onProgress?: (position: number, duration: number) => void
   onBack?: () => void
@@ -18,6 +20,7 @@ export function VideoPlayer({
   title,
   subtitle,
   subtitles,
+  openSubtitles,
   initialPosition = 0,
   onProgress,
   onBack,
@@ -53,6 +56,9 @@ export function VideoPlayer({
   const [hlsSubTracks, setHlsSubTracks] = useState<{ id: number; name: string; lang: string }[]>([])
   const [activeHlsSub, setActiveHlsSub] = useState<number>(-1)
   const [showSubMenu, setShowSubMenu] = useState(false)
+
+  // OpenSubtitles state
+  const [loadingOpenSub, setLoadingOpenSub] = useState<string | null>(null) // dl_link being loaded
 
   // ─── HLS setup ────────────────────────────────────────────────────────────
 
@@ -205,7 +211,10 @@ export function VideoPlayer({
           }
         } else if (activeSubtitle) {
           // External subtitle mode — show only the matching label
-          const isActive = tt.label === subtitles?.find((s) => s.id === activeSubtitle)?.label
+          const activeLabel = activeSubtitle.startsWith('os:')
+            ? openSubtitles?.find((s) => `os:${s.dl_link}` === activeSubtitle)?.language + ' (OS)'
+            : subtitles?.find((s) => s.id === activeSubtitle)?.label
+          const isActive = tt.label === activeLabel
           if (isActive && tt.mode !== 'showing') tt.mode = 'showing'
           else if (!isActive && tt.mode === 'showing') tt.mode = 'hidden'
         }
@@ -213,7 +222,7 @@ export function VideoPlayer({
     }, 300)
 
     return () => clearInterval(interval)
-  }, [activeHlsSub, activeSubtitle])
+  }, [activeHlsSub, activeSubtitle, hlsSubTracks, subtitles, openSubtitles])
 
   // ─── External subtitle loading ────────────────────────────────────────────
 
@@ -621,7 +630,7 @@ export function VideoPlayer({
 
             <div className="ml-auto flex items-center gap-2">
               {/* Subtitles */}
-              {(hlsSubTracks.length > 0 || (subtitles && subtitles.length > 0)) && (
+              {(hlsSubTracks.length > 0 || (subtitles && subtitles.length > 0) || (openSubtitles && openSubtitles.length > 0)) && (
                 <div className="relative">
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowSubMenu((v) => !v); setShowLangMenu(false) }}
@@ -692,6 +701,76 @@ export function VideoPlayer({
                           {track.label}
                         </button>
                       ))}
+                      {/* OpenSubtitles matches from Premiumize API */}
+                      {openSubtitles && openSubtitles.length > 0 && (
+                        <>
+                          {subtitles && subtitles.length > 0 && (
+                            <div className="border-t border-white/10 my-1" />
+                          )}
+                          <div className="px-4 py-1 text-[10px] uppercase tracking-wider text-white/30 font-bold">
+                            OpenSubtitles
+                          </div>
+                          {openSubtitles.map((sub) => (
+                            <button
+                              key={sub.dl_link}
+                              onClick={() => {
+                                if (hlsRef.current) hlsRef.current.subtitleTrack = -1
+                                setActiveHlsSub(-1)
+                                // Load SRT from dl_link, convert to VTT, apply
+                                setLoadingOpenSub(sub.dl_link)
+                                setActiveSubtitle(null)
+                                const video = videoRef.current
+                                if (!video) return
+                                // Remove old tracks
+                                video.querySelectorAll('track.subtitle-track').forEach(t => t.remove())
+                                if (subtitleBlobRef.current) {
+                                  URL.revokeObjectURL(subtitleBlobRef.current)
+                                  subtitleBlobRef.current = null
+                                }
+                                fetch(sub.dl_link)
+                                  .then(r => r.text())
+                                  .then(text => {
+                                    if (!video) return
+                                    const vtt = sub.name.toLowerCase().endsWith('.vtt') ? text : srtToVtt(text)
+                                    const blob = new Blob([vtt], { type: 'text/vtt' })
+                                    const url = URL.createObjectURL(blob)
+                                    subtitleBlobRef.current = url
+                                    const el = document.createElement('track')
+                                    el.className = 'subtitle-track'
+                                    el.kind = 'subtitles'
+                                    el.label = `${sub.language} (OS)`
+                                    el.srclang = sub.iso_code || ''
+                                    el.src = url
+                                    video.appendChild(el)
+                                    el.addEventListener('load', () => {
+                                      for (let i = 0; i < video.textTracks.length; i++) {
+                                        const tt = video.textTracks[i]
+                                        tt.mode = tt.label === `${sub.language} (OS)` ? 'showing' : 'disabled'
+                                      }
+                                    }, { once: true })
+                                    // Set as active
+                                    setActiveSubtitle(`os:${sub.dl_link}`)
+                                    setLoadingOpenSub(null)
+                                  })
+                                  .catch(() => setLoadingOpenSub(null))
+                                setShowSubMenu(false)
+                              }}
+                              className={`w-full text-left px-4 py-2 text-sm transition-colors ${
+                                activeSubtitle === `os:${sub.dl_link}` ? 'bg-red-600 text-white' : 'text-white/80 hover:bg-white/10'
+                              }`}
+                            >
+                              {loadingOpenSub === sub.dl_link ? (
+                                <span className="flex items-center gap-2">
+                                  <span className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin inline-block" />
+                                  Loading...
+                                </span>
+                              ) : (
+                                <span>{sub.language} <span className="text-white/30 text-xs">{sub.name}</span></span>
+                              )}
+                            </button>
+                          ))}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

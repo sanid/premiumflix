@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import { VideoPlayer } from '../components/VideoPlayer'
-import { itemDetails } from '../services/premiumize'
+import { itemDetails, fetchSubtitles } from '../services/premiumize'
+import type { PMSubtitle } from '../services/premiumize'
 import { getProgress } from '../db'
 import { movieDisplayTitle, showDisplayTitle, movieMainFile } from '../types'
 import type { MediaFile } from '../types'
@@ -38,6 +39,7 @@ export function Player() {
   const [title, setTitle] = useState('')
   const [subtitle, setSubtitle] = useState<string | undefined>()
   const [initialPosition, setInitialPosition] = useState(0)
+  const [openSubs, setOpenSubs] = useState<PMSubtitle[]>([])
 
   useEffect(() => {
     if (!mediaId || !fileId || !mode) return
@@ -90,6 +92,14 @@ export function Player() {
         setInitialPosition(saved.position)
       }
     })
+
+    // Fetch OpenSubtitles matches in background (non-blocking)
+    fetchSubtitles(pmId).then((subs) => {
+      if (!cancelled && subs.length > 0) {
+        console.log('[Player:page] OpenSubtitles found:', subs.length, 'subs')
+        setOpenSubs(subs)
+      }
+    }).catch(() => {})
 
     // ── Get playback URL ──────────────────────────────────────────────────
     //
@@ -176,6 +186,7 @@ export function Player() {
         title={title}
         subtitle={subtitle}
         subtitles={file?.subtitles}
+        openSubtitles={openSubs}
         initialPosition={initialPosition}
         onProgress={handleProgress}
         onBack={handleBack}

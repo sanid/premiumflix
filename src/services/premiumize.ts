@@ -29,6 +29,24 @@ async function pmFetch<T>(path: string, params: Record<string, string> = {}): Pr
   return data as T
 }
 
+export async function pmPost<T>(path: string, body: Record<string, string> = {}): Promise<T> {
+  const url = new URL(`${baseUrl()}/${path}`, window.location.href)
+  url.searchParams.set('apikey', getApiKey())
+  const formBody = new URLSearchParams()
+  for (const [k, v] of Object.entries(body)) {
+    formBody.set(k, v)
+  }
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formBody.toString(),
+  })
+  if (!res.ok) throw new Error(`Premiumize API ${path}: HTTP ${res.status}`)
+  const data = await res.json()
+  if (data.status === 'error') throw new Error(data.message ?? 'Premiumize API error')
+  return data as T
+}
+
 export async function listFolder(id?: string): Promise<PMFolderListResponse> {
   const params: Record<string, string> = { includebreadcrumbs: 'true' }
   if (id) params.id = id
@@ -205,4 +223,38 @@ export async function getDirectLink(itemId: string): Promise<string> {
   const details = await itemDetails(itemId)
   if (!details.link) throw new Error('No download link available for this item')
   return details.link
+}
+
+// ─── Subtitles (OpenSubtitles via Premiumize) ─────────────────────────────────
+
+export interface PMSubtitle {
+  name: string
+  language: string
+  iso_code: string
+  dl_link: string
+}
+
+export interface PMSubtitlesResponse {
+  status: string
+  // Array of subtitle objects from OpenSubtitles
+  [key: number]: PMSubtitle
+}
+
+/**
+ * Fetch available subtitles for a file from OpenSubtitles (via Premiumize API).
+ * Matches subtitles by filename/hash.
+ */
+export async function fetchSubtitles(itemId: string): Promise<PMSubtitle[]> {
+  try {
+    const data = await pmPost<Record<string, any>>('item/subtitles', { id: itemId })
+    // API returns an object with numeric keys (like an array) or an array
+    if (Array.isArray(data)) return data as PMSubtitle[]
+    const entries = Object.values(data)
+    // Filter out non-subtitle fields like 'status'
+    return entries.filter(
+      (e: any) => e && typeof e === 'object' && e.name && e.dl_link
+    ) as PMSubtitle[]
+  } catch {
+    return []
+  }
 }
