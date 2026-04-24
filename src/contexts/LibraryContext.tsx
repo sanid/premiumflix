@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import type { Movie, TVShow, ScanFolderSelection } from '../types'
 import { scanLibrary, type ScanProgress } from '../services/scanner'
 import { saveLibrary, loadLibrary, clearLibrary, appendMovie, appendTVShow, deleteMovie, deleteTVShow } from '../db'
-import { ingestItem } from '../services/autoIngest'
+import { ingestItem, ingestEpisode } from '../services/autoIngest'
 import { listTransfers } from '../services/premiumize'
 import { syncLibraryToCloud, loadLibraryFromCloud } from '../services/cloudSync'
 
@@ -21,7 +21,7 @@ interface LibraryContextValue {
   removeShowFromLibrary: (id: string) => Promise<void>
   updateMovieInLibrary: (movie: Movie) => void
   updateShowInLibrary: (show: TVShow) => void
-  monitorTransfer: (transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show' }) => void
+  monitorTransfer: (transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show'; season?: number; episode?: number }) => void
   notifications: string[]
   dismissNotification: (index: number) => void
   restoreFromCloud: () => Promise<boolean>
@@ -39,7 +39,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const scanningRef = useRef(false)
 
   const [notifications, setNotifications] = useState<string[]>([])
-  const [pendingTransfers, setPendingTransfers] = useState<{ id: string; name: string; tmdbId?: number; type?: 'movie' | 'show' }[]>([])
+  const [pendingTransfers, setPendingTransfers] = useState<{ id: string; name: string; tmdbId?: number; type?: 'movie' | 'show'; season?: number; episode?: number }[]>([])
 
   // Load from IndexedDB and localStorage on mount
   useEffect(() => {
@@ -112,10 +112,23 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
             const itemId = t?.folder_id || t?.file_id
             
             if (itemId && pt) {
-              ingestItem(itemId, pt.type).then(result => {
-                result.movies.forEach(m => appendMovieToLibrary(m))
-                result.shows.forEach(s => appendShowToLibrary(s))
-              }).catch(err => console.error('Auto-ingest failed', err))
+              if (pt.type === 'show' && pt.tmdbId) {
+                // For TV episodes, merge into existing show or create a stub
+                ingestEpisode(itemId, pt.tmdbId, pt.season, pt.episode).then(result => {
+                  if (result) {
+                    if (result.isNew) {
+                      appendShowToLibrary(result.show)
+                    } else {
+                      updateShowInLibrary(result.show)
+                    }
+                  }
+                }).catch(err => console.error('Episode ingest failed', err))
+              } else {
+                ingestItem(itemId, pt.type).then(result => {
+                  result.movies.forEach(m => appendMovieToLibrary(m))
+                  result.shows.forEach(s => appendShowToLibrary(s))
+                }).catch(err => console.error('Auto-ingest failed', err))
+              }
             }
           }
         }
@@ -127,7 +140,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval)
   }, [pendingTransfers])
 
-  const monitorTransfer = useCallback((transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show' }) => {
+  const monitorTransfer = useCallback((transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show'; season?: number; episode?: number }) => {
     setPendingTransfers(prev => {
       if (prev.some(p => p.id === transferId)) return prev
       const next = [...prev, { id: transferId, name, ...metadata }]

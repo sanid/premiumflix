@@ -275,9 +275,14 @@ export function AddMovie() {
       // Poll for transfer progress
       pollTransferProgress(transfer.id, id)
 
-      // Monitor this transfer globally for notifications
+      // Monitor this transfer globally for notifications + episode merging
       if (selectedTmdbItem) {
-        monitorTransfer(transfer.id, item.title, { tmdbId: selectedTmdbItem.id, type: mediaType as 'movie' | 'show' })
+        monitorTransfer(transfer.id, item.title, {
+          tmdbId: selectedTmdbItem.id,
+          type: mediaType as 'movie' | 'show',
+          season: item.season,
+          episode: item.episode,
+        })
       } else {
         monitorTransfer(transfer.id, item.title)
       }
