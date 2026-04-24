@@ -31,6 +31,10 @@ export function Player() {
   useEffect(() => {
     if (!mediaId || !fileId || !mode) return
 
+    let cancelled = false
+
+    // ── Find file in library ─────────────────────────────────────────────
+
     let foundFile: MediaFile | undefined
     let mediaTitle = ''
     let mediaSubtitle: string | undefined
@@ -69,53 +73,44 @@ export function Player() {
     setTitle(mediaTitle)
     setSubtitle(mediaSubtitle)
 
-    const f = foundFile
-    const pmId = f.premiumizeId
+    const pmId = foundFile.premiumizeId
 
-    // Load saved progress from IndexedDB
-    getProgress(f.id).then((saved) => {
+    // ── Load saved progress ──────────────────────────────────────────────
+
+    getProgress(foundFile.id).then((saved) => {
       if (saved && saved.duration > 0 && saved.position / saved.duration < 0.9) {
         setInitialPosition(saved.position)
       }
     })
 
-    // ── Playback URL strategy ──────────────────────────────────────────────
+    // ── Always fetch fresh stream URL ────────────────────────────────────
     //
-    // Always prefer the transcoded HLS stream (stream_link) because it includes
-    // proper audio tracks and embedded subtitles from CDN77. Raw MKV direct links
-    // often have unsupported audio codecs and no subtitle extraction.
-    //
-    // 1. stream_link cached from scan → play immediately (best quality + subs).
-    // 2. No cached stream_link → fetch from Premiumize API (triggers transcode).
-    // 3. Fallback: directLink as last resort (may lack audio/subtitle support).
+    // Premiumize stream_link and link URLs expire after some time.
+    // We must always call the API to get a fresh URL before playing.
+    // The transcoded HLS stream (stream_link) includes audio tracks
+    // and embedded subtitles from CDN77.
 
-    if (f.streamLink) {
-      setPlayUrl(f.streamLink)
-      setLoading(false)
-      return
-    }
+    setLoading(true)
 
-    // Always fetch the transcoded HLS stream for best audio/subtitle support
-    fetchItemDetailsWithTranscode(pmId, 15)
+    fetchItemDetailsWithTranscode(pmId, 20)
       .then((d) => {
+        if (cancelled) return
         const url = d.stream_link ?? d.link ?? null
         if (url) {
           setPlayUrl(url)
-        } else if (f.directLink) {
-          // Last resort: try direct link (audio/subs may not work)
-          setPlayUrl(f.directLink)
         } else {
           setError('Could not get playback URL. The file may still be transcoding — try again in a few minutes.')
         }
       })
       .catch(() => {
-        if (f.directLink) {
-          setPlayUrl(f.directLink)
-        } else {
-          setError('Failed to fetch playback URL.')
-        }
+        if (cancelled) return
+        setError('Failed to fetch playback URL. Check your connection and try again.')
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => { cancelled = true }
   }, [mediaId, fileId, mode, movies, tvShows])
 
   function handleProgress(position: number, duration: number) {
@@ -130,7 +125,7 @@ export function Player() {
     return (
       <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-4">
         <div className="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
-        <p className="text-white/60 text-sm">Loading...</p>
+        <p className="text-white/60 text-sm">Loading stream...</p>
       </div>
     )
   }
