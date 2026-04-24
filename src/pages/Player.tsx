@@ -7,15 +7,19 @@ import { itemDetails } from '../services/premiumize'
 import { getProgress } from '../db'
 import { movieDisplayTitle, showDisplayTitle, movieMainFile } from '../types'
 import type { MediaFile } from '../types'
-import type { PMItemDetailResponse } from '../types'
 
 type PlayMode = 'movie' | 'show'
 
-type LoadingState = 
-  | 'finding-file'
-  | 'waiting-transcode'
-  | 'loading-stream'
-  | 'error'
+/**
+ * Construct a CDN77 live-transcode HLS URL from the raw download link.
+ * This is exactly what Premiumize does on their own player page —
+ * CDN77 transcodes on-the-fly so there's no waiting.
+ *
+ * Pattern: https://cdn77-livetranscode2.energycdn.com/vod/{directLink}/index.m3u8
+ */
+function liveTranscodeUrl(directLink: string): string {
+  return `https://cdn77-livetranscode2.energycdn.com/vod/${directLink}/index.m3u8`
+}
 
 export function Player() {
   const { mode, mediaId, fileId } = useParams<{
@@ -28,20 +32,16 @@ export function Player() {
   const navigate = useNavigate()
 
   const [playUrl, setPlayUrl] = useState<string | null>(null)
-  const [loadingState, setLoadingState] = useState<LoadingState>('finding-file')
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [file, setFile] = useState<MediaFile | null>(null)
   const [title, setTitle] = useState('')
   const [subtitle, setSubtitle] = useState<string | undefined>()
   const [initialPosition, setInitialPosition] = useState(0)
-  const [transcodeStatus, setTranscodeStatus] = useState<string>('')
-  const [pollCount, setPollCount] = useState(0)
-  const cancelledRef = useRef(false)
 
   useEffect(() => {
     if (!mediaId || !fileId || !mode) return
-
-    cancelledRef.current = false
+    let cancelled = false
 
     // ── Find file in library ─────────────────────────────────────────────
 
@@ -74,107 +74,67 @@ export function Player() {
     }
 
     if (!foundFile) {
-      setErrorMsg('File not found in library')
-      setLoadingState('error')
+      setError('File not found in library')
+      setLoading(false)
       return
     }
 
     setFile(foundFile)
     setTitle(mediaTitle)
     setSubtitle(mediaSubtitle)
-
     const pmId = foundFile.premiumizeId
 
-    // ── Load saved progress ──────────────────────────────────────────────
-
+    // Load saved progress
     getProgress(foundFile.id).then((saved) => {
       if (saved && saved.duration > 0 && saved.position / saved.duration < 0.9) {
         setInitialPosition(saved.position)
       }
     })
 
-    // ── Poll for transcoded HLS stream ────────────────────────────────────
+    // ── Get playback URL ──────────────────────────────────────────────────
     //
-    // Premiumize transcodes MKV files to HLS on-demand. This can take
-    // 2-5 minutes for large files. We poll every 5 seconds until the
-    // stream_link is ready. The raw 'link' is useless for us because
-    // browsers can't decode AC3/DTS audio in MKV containers.
+    // Strategy (same as Premiumize's own website):
+    // 1. Call itemDetails API to get the direct link (fast, < 1 second)
+    // 2. If stream_link is ready (already transcoded) → use it directly
+    // 3. Otherwise, construct CDN77 live-transcode URL from the direct link
+    //    → CDN77 transcodes on-the-fly, plays instantly
 
-    setLoadingState('waiting-transcode')
-    setPollCount(0)
+    itemDetails(pmId)
+      .then((d) => {
+        if (cancelled) return
 
-    let lastDetails: PMItemDetailResponse | null = null
-
-    async function pollTranscode() {
-      const maxAttempts = 60 // 60 × 5s = 5 minutes max wait
-
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        if (cancelledRef.current) return
-
-        setPollCount(attempt + 1)
-
-        try {
-          lastDetails = await itemDetails(pmId)
-        } catch {
-          // Network error — wait and retry
-          await new Promise((r) => setTimeout(r, 5000))
-          continue
-        }
-
-        if (cancelledRef.current) return
-
-        const status = (lastDetails.transcode_status ?? '').toLowerCase()
-        setTranscodeStatus(status || 'unknown')
-
-        console.log(`[Player:page] Poll ${attempt + 1}/${maxAttempts}:`, {
-          stream_link: lastDetails.stream_link ? lastDetails.stream_link.substring(0, 80) + '...' : null,
-          transcode_status: status,
+        console.log('[Player:page] API response:', {
+          stream_link: d.stream_link ? '✓ ' + d.stream_link.substring(0, 60) + '...' : '✗ null',
+          link: d.link ? '✓ ' + d.link.substring(0, 60) + '...' : '✗ null',
+          transcode_status: d.transcode_status,
         })
 
-        // Success — transcoded HLS stream is ready
-        if (lastDetails.stream_link) {
-          if (!cancelledRef.current) {
-            setLoadingState('loading-stream')
-            setPlayUrl(lastDetails.stream_link)
-          }
+        // Best case: stream_link already available (cached transcode)
+        if (d.stream_link) {
+          setPlayUrl(d.stream_link)
+          setLoading(false)
           return
         }
 
-        // Already an MP4 or other natively-playable format — use direct link
-        if (lastDetails.link) {
-          const url = lastDetails.link.toLowerCase()
-          if (url.includes('.mp4') || url.includes('.m4v') || url.includes('.m3u8')) {
-            if (!cancelledRef.current) {
-              setLoadingState('loading-stream')
-              setPlayUrl(lastDetails.link)
-            }
-            return
-          }
-        }
-
-        // Fatal transcode errors
-        if (status === 'error' || status === 'failed') {
-          if (!cancelledRef.current) {
-            setErrorMsg('Transcoding failed. The file format may not be supported.')
-            setLoadingState('error')
-          }
+        // Construct live transcode URL from direct link (instant playback)
+        if (d.link) {
+          const hlsUrl = liveTranscodeUrl(d.link)
+          console.log('[Player:page] Constructed live transcode URL:', hlsUrl.substring(0, 100) + '...')
+          setPlayUrl(hlsUrl)
+          setLoading(false)
           return
         }
 
-        // Still pending/queued — wait 5 seconds and try again
-        await new Promise((r) => setTimeout(r, 5000))
-      }
+        setError('Could not get playback URL.')
+        setLoading(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setError('Failed to fetch playback URL. Check your connection.')
+        setLoading(false)
+      })
 
-      // Timed out after 5 minutes
-      if (!cancelledRef.current) {
-        setErrorMsg('Transcoding is taking too long. Try again in a few minutes.')
-        setLoadingState('error')
-      }
-    }
-
-    pollTranscode()
-
-    return () => { cancelledRef.current = true }
+    return () => { cancelled = true }
   }, [mediaId, fileId, mode, movies, tvShows])
 
   function handleProgress(position: number, duration: number) {
@@ -185,63 +145,20 @@ export function Player() {
     navigate(-1)
   }
 
-  // ── Loading / waiting screen ──────────────────────────────────────────────
-
-  if (loadingState === 'finding-file' || (loadingState === 'waiting-transcode' && !playUrl)) {
+  if (loading) {
     return (
-      <div className="fixed inset-0 bg-premiumflix-dark flex flex-col items-center justify-center gap-6 px-4">
-        <div className="w-14 h-14 border-4 border-white/20 border-t-premiumflix-red rounded-full animate-spin" />
-        
-        {loadingState === 'waiting-transcode' && (
-          <div className="text-center">
-            <p className="text-white font-semibold text-lg mb-2">Preparing stream...</p>
-            <p className="text-white/50 text-sm max-w-xs">
-              Premiumize is transcoding this file for browser playback.
-              This usually takes 1-3 minutes for large files.
-            </p>
-            <div className="flex items-center justify-center gap-3 mt-4">
-              <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold uppercase ${
-                transcodeStatus === 'finished' ? 'bg-green-600 text-white' :
-                transcodeStatus === 'pending' ? 'bg-yellow-600/80 text-white' :
-                transcodeStatus === 'queued' ? 'bg-blue-600/80 text-white' :
-                transcodeStatus === 'error' || transcodeStatus === 'failed' ? 'bg-red-600 text-white' :
-                'bg-white/10 text-white/60'
-              }`}>
-                {transcodeStatus || 'loading'}
-              </span>
-              {pollCount > 0 && (
-                <span className="text-white/30 text-xs">
-                  {pollCount * 5}s elapsed
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {loadingState === 'finding-file' && (
-          <p className="text-white/60 text-sm">Loading...</p>
-        )}
-
-        <button
-          onClick={handleBack}
-          className="text-white/40 hover:text-white text-sm underline mt-4"
-        >
-          Go back
-        </button>
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-4">
+        <div className="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
+        <p className="text-white/60 text-sm">Loading...</p>
       </div>
     )
   }
 
-  // ── Error screen ──────────────────────────────────────────────────────────
-
-  if (loadingState === 'error' || !playUrl) {
+  if (error || !playUrl) {
     return (
-      <div className="fixed inset-0 bg-premiumflix-dark flex flex-col items-center justify-center gap-4 px-4 text-center">
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-4 px-4 text-center">
         <div className="text-premiumflix-red text-5xl">⚠</div>
-        <p className="text-white font-semibold">{errorMsg ?? 'Playback unavailable'}</p>
-        <p className="text-white/60 text-sm max-w-sm">
-          Make sure the file is fully uploaded to Premiumize and try again.
-        </p>
+        <p className="text-white font-semibold">{error ?? 'Playback unavailable'}</p>
         <button
           onClick={() => navigate(-1)}
           className="bg-white text-black font-bold px-6 py-2 rounded hover:bg-white/80"
@@ -251,8 +168,6 @@ export function Player() {
       </div>
     )
   }
-
-  // ── Player ────────────────────────────────────────────────────────────────
 
   return (
     <div className="fixed inset-0 bg-black">
