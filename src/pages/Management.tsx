@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
-import { deleteItem, deleteFolder } from '../services/premiumize'
+import { deleteItem, deleteFolder, getOrCreateMoviesFolder, getOrCreateShowsFolder, createTransfer } from '../services/premiumize'
+import { searchMovieNzb, searchShowNzb } from '../services/scenenzbs'
 import {
   searchMovieRaw, searchTVRaw,
   getMovieDetailByTmdbId, getTVDetailByTmdbId,
@@ -9,64 +10,248 @@ import {
   getSeasonDetail,
 } from '../services/metadata'
 import { bestLogoPath, bestTrailerKey } from '../services/tmdb'
-import { db } from '../db'
+import { db, getAllProgress } from '../db'
 import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl, formatFileSize } from '../types'
-import type { Movie, TVShow, TMDBMovie } from '../types'
+import type { Movie, TVShow, TMDBMovie, WatchProgress } from '../types'
 
 type Tab = 'movies' | 'shows'
-type ConfirmAction = { type: 'lib' | 'cloud' | 'both'; id: string; mediaType: Tab } | null
+type Filter = 'all' | 'unwatched' | 'cloudRemoved'
+type ConfirmAction = { type: 'lib' | 'cloud' | 'both' | 'cloudOnly'; ids: string[]; mediaType: Tab } | null
 
 export function Management() {
-  const { movies, tvShows, removeMovieFromLibrary, removeShowFromLibrary, updateMovieInLibrary, updateShowInLibrary } = useLibrary()
+  const { movies, tvShows, removeMovieFromLibrary, removeShowFromLibrary, updateMovieInLibrary, updateShowInLibrary, monitorTransfer } = useLibrary()
   const navigate = useNavigate()
 
   const [tab, setTab] = useState<Tab>('movies')
   const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<Filter>('all')
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
   const [actionStatus, setActionStatus] = useState<Record<string, string>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
 
+  // Multi-select
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selectMode, setSelectMode] = useState(false)
+
+  // Watch progress for "never watched" detection
+  const [watchedFileIds, setWatchedFileIds] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    getAllProgress().then((all: WatchProgress[]) => {
+      setWatchedFileIds(new Set(all.map(p => p.fileId)))
+    })
+  }, [])
+
+  function isNeverWatched(item: Movie | TVShow): boolean {
+    if ('files' in item) {
+      return (item as Movie).files.every(f => !watchedFileIds.has(f.premiumizeId))
+    }
+    return (item as TVShow).seasons.every(s =>
+      s.episodes.every(e => !watchedFileIds.has(e.file.premiumizeId))
+    )
+  }
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    if (tab === 'movies') return movies.filter(m => movieDisplayTitle(m).toLowerCase().includes(q))
-    return tvShows.filter(s => showDisplayTitle(s).toLowerCase().includes(q))
-  }, [tab, search, movies, tvShows])
+    const base = tab === 'movies' ? movies : tvShows
+    let items = base.filter(item => {
+      const title = tab === 'movies'
+        ? movieDisplayTitle(item as Movie)
+        : showDisplayTitle(item as TVShow)
+      return title.toLowerCase().includes(q)
+    })
+    if (filter === 'unwatched') items = items.filter(i => isNeverWatched(i))
+    if (filter === 'cloudRemoved') items = items.filter(i => !!(i as Movie | TVShow).cloudRemoved)
+    return items
+  }, [tab, search, filter, movies, tvShows, watchedFileIds])
 
-  async function handleDelete(id: string, pmId: string, action: 'lib' | 'cloud' | 'both') {
-    setActionStatus(p => ({ ...p, [id]: 'Deleting...' }))
+  // Toggle selection
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function selectAll() {
+    setSelected(new Set(filtered.map(i => i.id)))
+  }
+
+  function selectNone() {
+    setSelected(new Set())
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false)
+    setSelected(new Set())
+  }
+
+  // Get PM id(s) for a library item
+  function getPmIds(item: Movie | TVShow): string[] {
+    if ('files' in item) {
+      return (item as Movie).files.map(f => f.premiumizeId)
+    }
+    const show = item as TVShow
+    return show.seasons.flatMap(s => s.episodes.map(e => e.file.premiumizeId))
+  }
+
+  async function handleDelete(ids: string[], action: 'lib' | 'cloud' | 'both' | 'cloudOnly') {
+    const items = ids.map(id => (tab === 'movies' ? movies : tvShows).find(i => i.id === id)).filter(Boolean) as (Movie | TVShow)[]
     setConfirmAction(null)
+
+    for (const item of items) {
+      setActionStatus(p => ({ ...p, [item.id]: 'Processing...' }))
+    }
+
+    for (const item of items) {
+      try {
+        if (action === 'cloud' || action === 'both') {
+          // Delete the item/folder from Premiumize
+          try { await deleteFolder(item.id) } catch { try { await deleteItem(item.id) } catch { /* may not exist */ } }
+        }
+        if (action === 'cloudOnly') {
+          // Delete from cloud but keep in library
+          try { await deleteFolder(item.id) } catch { try { await deleteItem(item.id) } catch { /* may not exist */ } }
+          const updated = { ...item, cloudRemoved: true }
+          if (tab === 'movies') {
+            await db.movies.update(item.id, { cloudRemoved: true })
+            updateMovieInLibrary(updated as Movie)
+          } else {
+            await db.tvShows.update(item.id, { cloudRemoved: true })
+            updateShowInLibrary(updated as TVShow)
+          }
+        }
+        if (action === 'lib' || action === 'both') {
+          if (tab === 'movies') await removeMovieFromLibrary(item.id)
+          else await removeShowFromLibrary(item.id)
+        }
+        setActionStatus(p => ({
+          ...p,
+          [item.id]: action === 'cloudOnly'
+            ? '☁ Removed from cloud (kept in library)'
+            : action === 'cloud'
+              ? '☁ Deleted from cloud'
+              : '✓ Removed',
+        }))
+      } catch (e) {
+        setActionStatus(p => ({ ...p, [item.id]: '✗ Error: ' + (e instanceof Error ? e.message : 'failed') }))
+      }
+    }
+    exitSelectMode()
+  }
+
+  // Re-download a cloud-removed item
+  async function handleRedownload(item: Movie | TVShow) {
+    const tmdbId = item.tmdbId ?? item.tmdbDetail?.id
+    if (!tmdbId) {
+      setActionStatus(p => ({ ...p, [item.id]: '✗ No TMDB ID — cannot re-download' }))
+      return
+    }
+
+    setActionStatus(p => ({ ...p, [item.id]: 'Searching NZBs...' }))
     try {
-      if (action === 'cloud' || action === 'both') {
-        try { await deleteFolder(pmId) } catch { try { await deleteItem(pmId) } catch { /* may not exist */ } }
+      const results = tab === 'movies'
+        ? await searchMovieNzb(tmdbId)
+        : await searchShowNzb(tmdbId)
+
+      if (results.length === 0) {
+        setActionStatus(p => ({ ...p, [item.id]: '✗ No NZBs found for this title' }))
+        return
       }
-      if (action === 'lib' || action === 'both') {
-        if (tab === 'movies') await removeMovieFromLibrary(id)
-        else await removeShowFromLibrary(id)
-      }
-      setActionStatus(p => ({ ...p, [id]: action === 'cloud' ? '☁ Deleted from cloud' : '✓ Removed' }))
+
+      // Pick the largest release (best quality)
+      const best = results.reduce((a, b) => (b.size > a.size ? b : a), results[0])
+
+      const folderId = tab === 'movies'
+        ? await getOrCreateMoviesFolder()
+        : await getOrCreateShowsFolder()
+
+      const transfer = await createTransfer(best.link, folderId)
+      monitorTransfer(transfer.id, best.title, { tmdbId, type: tab === 'movies' ? 'movie' : 'show' as const })
+
+      // Mark as no longer cloud-removed
+      await db.movies.update(item.id, { cloudRemoved: false })
+      const updated = { ...item, cloudRemoved: false }
+      if (tab === 'movies') updateMovieInLibrary(updated as Movie)
+      else updateShowInLibrary(updated as TVShow)
+
+      setActionStatus(p => ({ ...p, [item.id]: '⬇ Re-download started!' }))
     } catch (e) {
-      setActionStatus(p => ({ ...p, [id]: '✗ Error: ' + (e instanceof Error ? e.message : 'failed') }))
+      setActionStatus(p => ({ ...p, [item.id]: '✗ ' + (e instanceof Error ? e.message : 'Failed') }))
     }
   }
 
   const items = filtered as (Movie | TVShow)[]
+  const unwatchedCount = (tab === 'movies' ? movies : tvShows).filter(i => isNeverWatched(i)).length
+  const cloudRemovedCount = (tab === 'movies' ? movies : tvShows).filter(i => i.cloudRemoved).length
 
   return (
     <div className="min-h-screen bg-premiumflix-dark pt-20 pb-16">
       <div className="px-4 sm:px-8 lg:px-12 max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-white text-3xl font-black mb-1">Library Management</h1>
-          <p className="text-premiumflix-muted text-sm">
-            Edit metadata · Delete from library · Delete from Premiumize cloud
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-white text-3xl font-black mb-1">Library Management</h1>
+              <p className="text-premiumflix-muted text-sm">
+                Edit metadata · Delete from library · Remove from cloud to save space
+              </p>
+            </div>
+            <button
+              onClick={() => { setSelectMode(!selectMode); setSelected(new Set()) }}
+              className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${
+                selectMode
+                  ? 'bg-premiumflix-red text-white'
+                  : 'bg-white/10 text-premiumflix-muted hover:text-white hover:bg-white/20'
+              }`}
+            >
+              {selectMode ? '✕ Cancel' : '☐ Select'}
+            </button>
+          </div>
         </div>
 
-        {/* Search + tabs */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        {/* Bulk action bar */}
+        {selectMode && selected.size > 0 && (
+          <div className="mb-4 bg-premiumflix-surface border border-blue-500/30 rounded-xl px-5 py-3 flex flex-wrap items-center gap-3 animate-fade-in">
+            <span className="text-white font-bold text-sm">{selected.size} selected</span>
+            <button onClick={selectAll} className="text-blue-400 text-xs font-bold hover:underline">Select all</button>
+            <button onClick={selectNone} className="text-premiumflix-muted text-xs font-bold hover:underline">Deselect</button>
+            <span className="text-white/10">|</span>
+            <button
+              onClick={() => setConfirmAction({ type: 'cloudOnly', ids: [...selected], mediaType: tab })}
+              className="bg-amber-700/80 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+            >
+              ☁ Remove from cloud (keep in library)
+            </button>
+            <button
+              onClick={() => setConfirmAction({ type: 'cloud', ids: [...selected], mediaType: tab })}
+              className="bg-red-800/80 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+            >
+              ☁ Delete from cloud only
+            </button>
+            <button
+              onClick={() => setConfirmAction({ type: 'both', ids: [...selected], mediaType: tab })}
+              className="bg-red-700 hover:bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+            >
+              🗑 Delete everywhere
+            </button>
+          </div>
+        )}
+
+        {/* Select mode with 0 selected */}
+        {selectMode && selected.size === 0 && (
+          <div className="mb-4 bg-premiumflix-surface border border-white/10 rounded-xl px-5 py-3 flex items-center gap-3 text-premiumflix-muted text-sm animate-fade-in">
+            <span>Click items to select them</span>
+            <button onClick={selectAll} className="text-blue-400 text-xs font-bold hover:underline">Select all on this page</button>
+          </div>
+        )}
+
+        {/* Search + tabs + filters */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <div className="flex bg-premiumflix-surface border border-white/10 rounded-md overflow-hidden flex-shrink-0">
             {(['movies', 'shows'] as Tab[]).map(t => (
-              <button key={t} onClick={() => { setTab(t); setSearch('') }}
+              <button key={t} onClick={() => { setTab(t); setSearch(''); setFilter('all'); exitSelectMode() }}
                 className={`px-5 py-2.5 text-sm font-bold transition-colors capitalize ${tab === t ? 'bg-premiumflix-red text-white' : 'text-premiumflix-muted hover:text-white'}`}>
                 {t === 'movies' ? `🎬 Movies (${movies.length})` : `📺 Shows (${tvShows.length})`}
               </button>
@@ -77,6 +262,27 @@ export function Management() {
             placeholder={`Search ${tab}...`}
             className="flex-1 bg-premiumflix-surface border border-white/10 text-white text-sm px-4 py-2.5 rounded-md outline-none focus:border-white/40"
           />
+        </div>
+
+        {/* Filter pills */}
+        <div className="flex gap-2 mb-6 flex-wrap">
+          {([
+            { key: 'all' as Filter, label: 'All', count: tab === 'movies' ? movies.length : tvShows.length },
+            { key: 'unwatched' as Filter, label: 'Never watched', count: unwatchedCount },
+            { key: 'cloudRemoved' as Filter, label: 'Removed from cloud', count: cloudRemovedCount },
+          ]).map(f => (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                filter === f.key
+                  ? 'bg-white text-black'
+                  : 'bg-white/10 text-premiumflix-muted hover:bg-white/20 hover:text-white'
+              }`}
+            >
+              {f.label} ({f.count})
+            </button>
+          ))}
         </div>
 
         {/* Items list */}
@@ -91,12 +297,39 @@ export function Management() {
             const hasMeta = !!item.tmdbDetail
             const status = actionStatus[id]
             const isEditing = editingId === id
+            const isSelected = selected.has(id)
+            const neverWatched = isNeverWatched(item)
+            const isCloudRemoved = !!item.cloudRemoved
+            const totalSize = isMovie
+              ? (item as Movie).files.reduce((s, f) => s + (f.size || 0), 0)
+              : (item as TVShow).seasons.reduce((s2, se) => s2 + se.episodes.reduce((s3, ep) => s3 + (ep.file.size || 0), 0), 0)
 
             return (
-              <div key={id} className={`bg-premiumflix-surface rounded-lg border transition-colors ${isEditing ? 'border-premiumflix-red/50' : 'border-white/5 hover:border-white/15'}`}>
+              <div key={id} className={`bg-premiumflix-surface rounded-lg border transition-colors ${
+                isSelected ? 'border-blue-500/50 bg-blue-900/10' :
+                isCloudRemoved ? 'border-amber-500/20 opacity-60' :
+                isEditing ? 'border-premiumflix-red/50' :
+                'border-white/5 hover:border-white/15'
+              }`}>
                 <div className="flex items-center gap-4 p-4">
+                  {/* Checkbox */}
+                  {selectMode && (
+                    <button
+                      onClick={() => toggleSelect(id)}
+                      className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                        isSelected ? 'bg-blue-500 border-blue-500' : 'border-white/30 hover:border-white/60'
+                      }`}
+                    >
+                      {isSelected && (
+                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
+
                   {/* Poster */}
-                  <div className="w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-premiumflix-dark">
+                  <div className={`w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-premiumflix-dark ${isCloudRemoved ? 'grayscale' : ''}`}>
                     {poster ? <img src={poster} alt={title} className="w-full h-full object-cover" /> :
                       <div className="w-full h-full flex items-center justify-center text-premiumflix-muted/30 text-xs">?</div>}
                   </div>
@@ -104,56 +337,84 @@ export function Management() {
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-white font-semibold text-sm truncate">{title}</p>
+                      <p className={`font-semibold text-sm truncate ${isCloudRemoved ? 'text-premiumflix-muted' : 'text-white'}`}>{title}</p>
                       {year && <span className="text-premiumflix-muted text-xs">{year}</span>}
+                      {neverWatched && !isCloudRemoved && (
+                        <span className="text-[10px] bg-slate-700/60 text-slate-300 px-1.5 py-0.5 rounded font-medium">Never watched</span>
+                      )}
                       {!hasMeta && <span className="text-xs bg-yellow-800/60 text-yellow-300 px-1.5 py-0.5 rounded">No metadata</span>}
                       {!hasPoster && hasMeta && <span className="text-xs bg-orange-800/60 text-orange-300 px-1.5 py-0.5 rounded">No poster</span>}
+                      {isCloudRemoved && (
+                        <span className="text-[10px] bg-amber-800/60 text-amber-300 px-1.5 py-0.5 rounded font-bold">☁ Not on cloud</span>
+                      )}
                     </div>
-                    {isMovie && (
+                    {isMovie && !isCloudRemoved && (
                       <p className="text-premiumflix-muted text-xs mt-0.5">
                         {(item as Movie).files.length} file{(item as Movie).files.length !== 1 ? 's' : ''}
                         {(item as Movie).files[0]?.resolution && ` · ${(item as Movie).files[0].resolution}`}
                         {(item as Movie).files[0]?.videoCodec && ` · ${(item as Movie).files[0].videoCodec?.toUpperCase()}`}
                         {(item as Movie).files[0]?.audioCodec && ` · ${(item as Movie).files[0].audioCodec?.toUpperCase()}`}
                         {(item as Movie).files[0]?.language && ` · ${(item as Movie).files[0].language?.toUpperCase()}`}
-                        {(item as Movie).files[0]?.size > 0 && ` · ${formatFileSize((item as Movie).files[0].size)}`}
+                        {totalSize > 0 && ` · ${formatFileSize(totalSize)}`}
                       </p>
                     )}
-                    {!isMovie && (
+                    {!isMovie && !isCloudRemoved && (
                       <p className="text-premiumflix-muted text-xs mt-0.5">
                         {(item as TVShow).seasons.length} season{(item as TVShow).seasons.length !== 1 ? 's' : ''} ·{' '}
                         {(item as TVShow).seasons.reduce((n, s) => n + s.episodes.length, 0)} episodes
+                        {totalSize > 0 && ` · ${formatFileSize(totalSize)}`}
                       </p>
                     )}
                     {status && <p className="text-xs mt-1 text-green-400">{status}</p>}
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      onClick={() => navigate(isMovie ? `/movie/${id}` : `/show/${id}`)}
-                      className="text-premiumflix-muted hover:text-white transition-colors p-1.5 rounded hover:bg-white/10"
-                      title="View detail">
-                      <EyeIcon />
-                    </button>
-                    <button
-                      onClick={() => setEditingId(isEditing ? null : id)}
-                      className={`transition-colors p-1.5 rounded hover:bg-white/10 ${isEditing ? 'text-premiumflix-red' : 'text-premiumflix-muted hover:text-white'}`}
-                      title="Edit metadata">
-                      <EditIcon />
-                    </button>
-                    <button
-                      onClick={() => setConfirmAction({ type: 'lib', id, mediaType: tab })}
-                      className="text-premiumflix-muted hover:text-red-400 transition-colors p-1.5 rounded hover:bg-red-900/20"
-                      title="Remove from library">
-                      <LibTrashIcon />
-                    </button>
-                    <button
-                      onClick={() => setConfirmAction({ type: 'both', id, mediaType: tab })}
-                      className="text-premiumflix-muted hover:text-red-500 transition-colors p-1.5 rounded hover:bg-red-900/20"
-                      title="Delete from library + Premiumize cloud">
-                      <CloudTrashIcon />
-                    </button>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {isCloudRemoved ? (
+                      <>
+                        <button
+                          onClick={() => handleRedownload(item)}
+                          className="text-blue-400 hover:text-blue-300 transition-colors p-1.5 rounded hover:bg-blue-900/20 text-xs font-bold"
+                          title="Re-download to Premiumize"
+                        >
+                          <RefreshIcon />
+                        </button>
+                        <button
+                          onClick={() => setConfirmAction({ type: 'lib', ids: [id], mediaType: tab })}
+                          className="text-premiumflix-muted hover:text-red-400 transition-colors p-1.5 rounded hover:bg-red-900/20"
+                          title="Remove from library"
+                        >
+                          <LibTrashIcon />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => navigate(isMovie ? `/movie/${id}` : `/show/${id}`)}
+                          className="text-premiumflix-muted hover:text-white transition-colors p-1.5 rounded hover:bg-white/10"
+                          title="View detail">
+                          <EyeIcon />
+                        </button>
+                        <button
+                          onClick={() => setEditingId(isEditing ? null : id)}
+                          className={`transition-colors p-1.5 rounded hover:bg-white/10 ${isEditing ? 'text-premiumflix-red' : 'text-premiumflix-muted hover:text-white'}`}
+                          title="Edit metadata">
+                          <EditIcon />
+                        </button>
+                        <button
+                          onClick={() => setConfirmAction({ type: 'cloudOnly', ids: [id], mediaType: tab })}
+                          className="text-premiumflix-muted hover:text-amber-400 transition-colors p-1.5 rounded hover:bg-amber-900/20"
+                          title="Remove from cloud only (keep in library)">
+                          <CloudOffIcon />
+                        </button>
+                        <button
+                          onClick={() => setConfirmAction({ type: 'both', ids: [id], mediaType: tab })}
+                          className="text-premiumflix-muted hover:text-red-500 transition-colors p-1.5 rounded hover:bg-red-900/20"
+                          title="Delete from library + Premiumize cloud">
+                          <CloudTrashIcon />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -179,7 +440,7 @@ export function Management() {
         {items.length === 0 && (
           <div className="text-center py-24 text-premiumflix-muted">
             <p className="text-4xl mb-3">📭</p>
-            <p>{search ? `No results for "${search}"` : `No ${tab} in library`}</p>
+            <p>{search ? `No results for "${search}"` : filter === 'unwatched' ? 'Everything has been watched!' : filter === 'cloudRemoved' ? 'No cloud-removed items' : `No ${tab} in library`}</p>
           </div>
         )}
       </div>
@@ -189,21 +450,38 @@ export function Management() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setConfirmAction(null)}>
           <div className="bg-premiumflix-surface rounded-xl border border-white/10 shadow-2xl p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
             <h3 className="text-white font-black text-lg mb-2">
-              {confirmAction.type === 'lib' ? 'Remove from library?' : 'Delete everywhere?'}
+              {confirmAction.type === 'cloudOnly'
+                ? `Remove ${confirmAction.ids.length} item${confirmAction.ids.length > 1 ? 's' : ''} from cloud?`
+                : confirmAction.type === 'cloud'
+                  ? `Delete ${confirmAction.ids.length} item${confirmAction.ids.length > 1 ? 's' : ''} from cloud?`
+                  : confirmAction.type === 'both'
+                    ? `Delete ${confirmAction.ids.length} item${confirmAction.ids.length > 1 ? 's' : ''} everywhere?`
+                    : `Remove ${confirmAction.ids.length} item${confirmAction.ids.length > 1 ? 's' : ''} from library?`
+              }
             </h3>
             <p className="text-premiumflix-muted text-sm mb-6">
-              {confirmAction.type === 'lib'
-                ? 'Removes the title from Premiumflix. The files stay on Premiumize.'
-                : 'Removes from Premiumflix AND permanently deletes the files from your Premiumize cloud storage. This cannot be undone.'}
+              {confirmAction.type === 'cloudOnly'
+                ? 'Deletes files from Premiumize cloud to free space. The item stays in your library with a "Re-download" button so you can restore it anytime.'
+                : confirmAction.type === 'cloud'
+                  ? 'Permanently deletes the files from your Premiumize cloud storage. The item stays in your library but files are gone.'
+                  : confirmAction.type === 'both'
+                    ? 'Removes from library AND permanently deletes the files from your Premiumize cloud storage. This cannot be undone.'
+                    : 'Removes the title from your library. Files stay on Premiumize.'}
             </p>
             <div className="flex gap-3">
               <button onClick={() => setConfirmAction(null)}
                 className="flex-1 bg-premiumflix-dark border border-white/10 text-white py-2.5 rounded font-bold hover:bg-white/10 transition-colors">
                 Cancel
               </button>
-              <button onClick={() => handleDelete(confirmAction.id, confirmAction.id, confirmAction.type)}
-                className="flex-1 bg-red-700 hover:bg-red-600 text-white py-2.5 rounded font-bold transition-colors">
-                {confirmAction.type === 'lib' ? 'Remove' : 'Delete forever'}
+              <button onClick={() => handleDelete(confirmAction.ids, confirmAction.type)}
+                className={`flex-1 py-2.5 rounded font-bold transition-colors text-white ${
+                  confirmAction.type === 'cloudOnly'
+                    ? 'bg-amber-700 hover:bg-amber-600'
+                    : confirmAction.type === 'cloud'
+                      ? 'bg-red-800 hover:bg-red-700'
+                      : 'bg-red-700 hover:bg-red-600'
+                }`}>
+                {confirmAction.type === 'cloudOnly' ? 'Remove from cloud' : confirmAction.type === 'lib' ? 'Remove' : 'Delete forever'}
               </button>
             </div>
           </div>
@@ -350,4 +628,19 @@ function LibTrashIcon() {
 }
 function CloudTrashIcon() {
   return <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+}
+function CloudOffIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2 2l20 20" />
+    </svg>
+  )
+}
+function RefreshIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  )
 }

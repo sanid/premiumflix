@@ -235,6 +235,7 @@ export interface Movie {
   trailerKey?: string
   logoPath?: string
   addedAt?: number
+  cloudRemoved?: boolean
 }
 
 export interface TVShow {
@@ -248,6 +249,7 @@ export interface TVShow {
   credits?: TMDBCredits
   trailerKey?: string
   logoPath?: string
+  cloudRemoved?: boolean
 }
 
 export interface Season {
