@@ -90,8 +90,24 @@ export function VideoPlayer({
   // ─── Mobile detection ────────────────────────────────────────────────────
   const isMobile = useMemo(() => 'ontouchstart' in window || navigator.maxTouchPoints > 0, [])
 
+  // ─── Seek dragging (live preview) ─────────────────────────────────────────
+  const [isSeekDragging, setIsSeekDragging] = useState(false)
+  const [seekPreviewTime, setSeekPreviewTime] = useState<number>(0)
+  const seekPreviewPct = duration > 0 ? (seekPreviewTime / duration) * 100 : 0
+
+  // ─── Swipe gesture (volume/brightness) ─────────────────────────────────────
+  const swipeStartRef = useRef<{ x: number; y: number; volume: number; brightness: number; side: 'left' | 'right' } | null>(null)
+  const [swipeGesture, setSwipeGesture] = useState<{ type: 'volume' | 'brightness'; value: number } | null>(null)
+  const [brightness, setBrightness] = useState(1)
+
+  // ─── Landscape detection ──────────────────────────────────────────────────
+  const [isPortrait, setIsPortrait] = useState(false)
+
   // ─── Keyboard shortcut help ──────────────────────────────────────────────
   const [showHelp, setShowHelp] = useState(false)
+
+  // ─── Mobile menu overlay ─────────────────────────────────────────────────
+  const [mobileMenuContent, setMobileMenuContent] = useState<React.ReactNode | null>(null)
 
   // ─── Storyboard thumbnails ──────────────────────────────────────────────
   const [thumbnails, setThumbnails] = useState<ThumbCue[]>([])
@@ -515,23 +531,25 @@ export function VideoPlayer({
 
   // ─── Control visibility ───────────────────────────────────────────────────
 
+  const hideDelay = isMobile ? 4000 : 3000
+
   const showControlsTemporarily = useCallback(() => {
     setShowControls(true)
     if (hideTimer.current) clearTimeout(hideTimer.current)
     hideTimer.current = setTimeout(() => {
       if (isPlaying) setShowControls(false)
-    }, 3000)
-  }, [isPlaying])
+    }, hideDelay)
+  }, [isPlaying, hideDelay])
 
   useEffect(() => {
     if (!isPlaying) setShowControls(true)
     else {
-      hideTimer.current = setTimeout(() => setShowControls(false), 3000)
+      hideTimer.current = setTimeout(() => setShowControls(false), hideDelay)
     }
     return () => {
       if (hideTimer.current) clearTimeout(hideTimer.current)
     }
-  }, [isPlaying])
+  }, [isPlaying, hideDelay])
 
   // ─── Fullscreen ──────────────────────────────────────────────────────────
 
@@ -567,6 +585,29 @@ export function VideoPlayer({
       exit?.call(document).catch(() => {})
     }
   }
+
+  // ─── Landscape detection ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isMobile) return
+    const check = () => {
+      setIsPortrait(window.innerHeight > window.innerWidth * 1.2)
+    }
+    check()
+    window.addEventListener('resize', check)
+    window.addEventListener('orientationchange', () => setTimeout(check, 200))
+    return () => {
+      window.removeEventListener('resize', check)
+    }
+  }, [isMobile])
+
+  // ─── Mobile menu overlay helper ──────────────────────────────────────────
+  const closeAllMenus = useCallback(() => {
+    setShowSubMenu(false)
+    setShowLangMenu(false)
+    setShowSpeedMenu(false)
+    setShowQualityMenu(false)
+    setMobileMenuContent(null)
+  }, [])
 
   // ─── Keyboard shortcuts ───────────────────────────────────────────────────
 
@@ -632,13 +673,28 @@ export function VideoPlayer({
     setCurrentTime(video.currentTime)
   }
 
+  function seekPreviewPosition(clientX: number) {
+    const bar = seekBarRef.current
+    if (!bar || !duration) return
+    const rect = bar.getBoundingClientRect()
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    setSeekPreviewTime(fraction * duration)
+  }
+
   function handleSeekBarClick(e: React.MouseEvent<HTMLDivElement>) {
     seekToPosition(e.clientX)
   }
 
+  function handleSeekBarTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+    if (e.touches.length > 0) {
+      setIsSeekDragging(true)
+      seekPreviewPosition(e.touches[0].clientX)
+    }
+  }
+
   function handleSeekBarTouch(e: React.TouchEvent<HTMLDivElement>) {
     if (e.touches.length > 0) {
-      seekToPosition(e.touches[0].clientX)
+      seekPreviewPosition(e.touches[0].clientX)
     }
   }
 
@@ -719,7 +775,23 @@ export function VideoPlayer({
     video.playbackRate = rate
     setPlaybackRate(rate)
     setShowSpeedMenu(false)
+    try { localStorage.setItem('player-speed', String(rate)) } catch {}
   }
+
+  // Load saved playback speed
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('player-speed')
+      if (saved) {
+        const rate = parseFloat(saved)
+        if (isFinite(rate) && rate > 0) {
+          const video = videoRef.current
+          if (video) video.playbackRate = rate
+          setPlaybackRate(rate)
+        }
+      }
+    } catch {}
+  }, [])
 
   function levelLabel(h: number): string {
     if (h >= 2160) return '4K'
@@ -798,13 +870,199 @@ export function VideoPlayer({
   const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0
   const bufferedPct = duration > 0 ? (buffered / duration) * 100 : 0
 
+  // ─── Mobile menu content builders ─────────────────────────────────────────
+
+  const subtitleMenuContent = useMemo(() => (
+    <>
+      <div className="px-4 py-2 text-white/40 text-xs font-bold uppercase tracking-wider border-b border-white/10">Subtitles</div>
+      <button
+        onClick={() => {
+          userSubOffRef.current = true
+          setActiveSubtitle(null)
+          setActiveHlsSub(-1)
+          if (hlsRef.current) hlsRef.current.subtitleTrack = -1
+          const v = videoRef.current
+          if (v) {
+            for (let i = 0; i < v.textTracks.length; i++) {
+              if (v.textTracks[i].kind === 'subtitles' || v.textTracks[i].kind === 'captions') {
+                v.textTracks[i].mode = 'hidden'
+              }
+            }
+          }
+          closeAllMenus()
+        }}
+        className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+          !activeSubtitle && activeHlsSub < 0 ? 'bg-red-600 text-white' : 'text-white/80 active:bg-white/10'
+        }`}
+      >
+        Off
+      </button>
+      {hlsSubTracks.map((track) => (
+        <button
+          key={`hls-${track.id}`}
+          onClick={() => {
+            userSubOffRef.current = false
+            setActiveSubtitle(null)
+            if (hlsRef.current) hlsRef.current.subtitleTrack = track.id
+            setActiveHlsSub(track.id)
+            closeAllMenus()
+          }}
+          className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+            track.id === activeHlsSub ? 'bg-red-600 text-white' : 'text-white/80 active:bg-white/10'
+          }`}
+        >
+          {track.name || track.lang || `Track ${track.id + 1}`}
+        </button>
+      ))}
+      {subtitles?.map((track) => (
+        <button
+          key={track.id}
+          onClick={() => {
+            userSubOffRef.current = false
+            if (hlsRef.current) hlsRef.current.subtitleTrack = -1
+            setActiveHlsSub(-1)
+            setActiveSubtitle(track.id)
+            closeAllMenus()
+          }}
+          className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+            track.id === activeSubtitle ? 'bg-red-600 text-white' : 'text-white/80 active:bg-white/10'
+          }`}
+        >
+          {track.label}
+        </button>
+      ))}
+    </>
+  ), [hlsSubTracks, subtitles, activeHlsSub, activeSubtitle, closeAllMenus])
+
+  const settingsMenuContent = useMemo(() => (
+    <>
+      {/* Speed section */}
+      <div className="px-4 py-2 text-white/40 text-xs font-bold uppercase tracking-wider border-b border-white/10">Speed</div>
+      <div className="flex flex-wrap gap-1 px-3 py-2">
+        {[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => (
+          <button
+            key={rate}
+            onClick={() => changeSpeed(rate)}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+              rate === playbackRate
+                ? 'bg-red-600 text-white'
+                : 'text-white/70 bg-white/10 active:bg-white/20'
+            }`}
+          >
+            {rate}x
+          </button>
+        ))}
+      </div>
+
+      {/* Audio section */}
+      {audioTracks.length > 1 && (
+        <>
+          <div className="px-4 py-2 text-white/40 text-xs font-bold uppercase tracking-wider border-b border-white/10">Audio</div>
+          {audioTracks.map((track) => (
+            <button
+              key={track.id}
+              onClick={() => {
+                if (hlsRef.current) hlsRef.current.audioTrack = track.id
+                closeAllMenus()
+              }}
+              className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                track.id === activeAudioTrack
+                  ? 'bg-red-600 text-white'
+                  : 'text-white/80 active:bg-white/10'
+              }`}
+            >
+              <span className="uppercase font-medium mr-2">{track.lang || '??'}</span>
+              <span className="text-white/60">{track.name}</span>
+            </button>
+          ))}
+        </>
+      )}
+
+      {/* Quality section */}
+      {levels.length > 1 && (
+        <>
+          <div className="px-4 py-2 text-white/40 text-xs font-bold uppercase tracking-wider border-b border-white/10">Quality</div>
+          <button
+            onClick={() => changeQuality(-1)}
+            className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+              autoLevel
+                ? 'bg-red-600 text-white font-bold'
+                : 'text-white/80 active:bg-white/10'
+            }`}
+          >
+            Auto{autoLevel && currentLevel >= 0 && ` (${levelLabel(levels[currentLevel]?.height)})`}
+          </button>
+          {levels.map((level, i) => (
+            <button
+              key={i}
+              onClick={() => changeQuality(i)}
+              className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                !autoLevel && i === currentLevel
+                  ? 'bg-red-600 text-white font-bold'
+                  : 'text-white/80 active:bg-white/10'
+              }`}
+            >
+              <span className="font-medium">{levelLabel(level.height)}</span>
+              {level.bitrate > 0 && <span className="text-white/40 ml-2">{(level.bitrate / 1_000_000).toFixed(1)} Mbps</span>}
+            </button>
+          ))}
+        </>
+      )}
+    </>
+  ), [playbackRate, audioTracks, activeAudioTrack, levels, autoLevel, currentLevel, closeAllMenus])
+
   return (
     <div
       ref={containerRef}
       className="relative w-full h-full bg-black select-none"
       style={{ cursor: showControls ? 'default' : 'none' }}
       onMouseMove={showControlsTemporarily}
+      onTouchStart={(e) => {
+        if (e.touches.length !== 1) return
+        const touch = e.touches[0]
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+        const x = touch.clientX - rect.left
+        swipeStartRef.current = {
+          x: touch.clientX,
+          y: touch.clientY,
+          volume,
+          brightness,
+          side: x < rect.width / 2 ? 'left' : 'right',
+        }
+      }}
+      onTouchMove={(e) => {
+        if (!swipeStartRef.current || e.touches.length !== 1) return
+        const touch = e.touches[0]
+        const dx = touch.clientX - swipeStartRef.current.x
+        const dy = touch.clientY - swipeStartRef.current.y
+        // Only activate for mostly-vertical swipes with significant movement
+        if (Math.abs(dy) < 20 || Math.abs(dx) > Math.abs(dy)) return
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+        const deltaNorm = Math.max(-1, Math.min(1, -dy / (rect.height * 0.4)))
+        if (swipeStartRef.current.side === 'right') {
+          // Right half: volume
+          const newVol = Math.max(0, Math.min(1, swipeStartRef.current.volume + deltaNorm))
+          const video = videoRef.current
+          if (video) {
+            video.volume = newVol
+            setVolume(newVol)
+            setIsMuted(newVol === 0)
+          }
+          setSwipeGesture({ type: 'volume', value: newVol })
+        } else {
+          // Left half: brightness
+          const newBright = Math.max(0.2, Math.min(1.5, swipeStartRef.current.brightness + deltaNorm * 0.6))
+          setBrightness(newBright)
+          setSwipeGesture({ type: 'brightness', value: newBright })
+        }
+      }}
       onTouchEnd={(e) => {
+        // Clear swipe state
+        const wasSwiping = swipeGesture !== null
+        setSwipeGesture(null)
+        swipeStartRef.current = null
+        if (wasSwiping) return
+
         // Only handle taps directly on the container (not on buttons/controls)
         const target = e.target as HTMLElement
         if (target !== containerRef.current && target !== videoRef.current && !target.closest('video')) return
@@ -828,6 +1086,7 @@ export function VideoPlayer({
               setTapFeedback({ side: isLeft ? 'left' : 'right', count: 2 })
               if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current)
               tapTimeoutRef.current = setTimeout(() => setTapFeedback(null), 600)
+              try { navigator.vibrate?.(10) } catch {}
             }
             lastTapRef.current = 0
             return
@@ -871,6 +1130,7 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         className="w-full h-full object-contain"
+        style={{ filter: brightness !== 1 ? `brightness(${brightness})` : undefined }}
         playsInline
         crossOrigin="anonymous"
         preload="auto"
@@ -883,17 +1143,81 @@ export function VideoPlayer({
         </div>
       )}
 
-      {/* Double-tap feedback */}
+      {/* Double-tap feedback — YouTube style, centered on tap side */}
       {tapFeedback && (
+        <div className={`absolute inset-y-0 ${tapFeedback.side === 'left' ? 'left-0 w-1/2' : 'right-0 w-1/2'} flex items-center justify-center pointer-events-none`}>
+          <div className="flex flex-col items-center gap-1 animate-pulse">
+            <div className="bg-white/20 rounded-full p-4">
+              {tapFeedback.side === 'left' ? (
+                <svg className="w-10 h-10 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" /></svg>
+              ) : (
+                <svg className="w-10 h-10 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" /></svg>
+              )}
+            </div>
+            <span className="text-white text-sm font-bold">10 seconds</span>
+          </div>
+        </div>
+      )}
+
+      {/* Swipe gesture feedback (volume / brightness) */}
+      {swipeGesture && (
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-40">
+          <div className="bg-black/70 rounded-xl px-5 py-4 flex flex-col items-center gap-2 min-w-[80px]">
+            {swipeGesture.type === 'volume' ? (
+              <VolumeIcon className="w-6 h-6 text-white" />
+            ) : (
+              <BrightnessIcon className="w-6 h-6 text-white" />
+            )}
+            <div className="w-16 h-1 bg-white/20 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-white rounded-full"
+                style={{ width: `${Math.min(100, (swipeGesture.value / (swipeGesture.type === 'volume' ? 1 : 1.5)) * 100)}%` }}
+              />
+            </div>
+            <span className="text-white text-xs font-medium">
+              {swipeGesture.type === 'volume'
+                ? `${Math.round(swipeGesture.value * 100)}%`
+                : `${Math.round((swipeGesture.value / 1.5) * 100)}%`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Landscape hint (portrait phone) */}
+      {isPortrait && isMobile && !isFullscreen && !isLoading && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 pointer-events-none z-30">
+          <div className="bg-black/60 rounded-full px-4 py-2 flex items-center gap-2">
+            <svg className="w-4 h-4 text-white/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <rect x="4" y="7" width="16" height="10" rx="2" />
+              <path d="M12 3v4M12 17v4" />
+            </svg>
+            <span className="text-white/60 text-xs">Rotate for fullscreen</span>
+          </div>
+        </div>
+      )}
+
+      {/* Seek drag preview */}
+      {isSeekDragging && duration > 0 && (
+        <div className="absolute left-1/2 top-1/3 -translate-x-1/2 pointer-events-none z-40">
+          <div className="bg-black/80 rounded-lg px-4 py-2">
+            <span className="text-white text-lg font-bold tabular-nums">{formatTime(seekPreviewTime)}</span>
+            <span className="text-white/50 text-sm ml-2 tabular-nums">/ {formatTime(duration)}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile menu overlay — replaces dropdown menus on small screens */}
+      {(isMobile && mobileMenuContent) && (
         <div
-          className={`absolute top-1/3 ${tapFeedback.side === 'left' ? 'left-8' : 'right-8'} pointer-events-none flex items-center gap-2 bg-black/50 rounded-full px-4 py-3 animate-pulse`}
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/80"
+          onClick={() => closeAllMenus()}
         >
-          {tapFeedback.side === 'left' ? (
-            <svg className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" /></svg>
-          ) : (
-            <svg className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" /></svg>
-          )}
-          <span className="text-white text-sm font-bold">10s</span>
+          <div
+            className="bg-black/95 backdrop-blur border border-white/20 rounded-xl max-h-[60vh] overflow-y-auto min-w-[200px] max-w-[280px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {mobileMenuContent}
+          </div>
         </div>
       )}
 
@@ -995,8 +1319,10 @@ export function VideoPlayer({
             ref={seekBarRef}
             className="relative bg-white/20 rounded-full cursor-pointer mb-2 sm:mb-3 group/seek h-2 sm:h-1 hover:h-3 sm:hover:h-3 transition-all touch-none"
             onClick={handleSeekBarClick}
+            onTouchStart={handleSeekBarTouchStart}
             onTouchMove={handleSeekBarTouch}
             onTouchEnd={(e) => {
+              setIsSeekDragging(false)
               if (e.changedTouches.length > 0) {
                 seekToPosition(e.changedTouches[0].clientX)
               }
@@ -1047,11 +1373,11 @@ export function VideoPlayer({
             />
             <div
               className="absolute top-0 left-0 h-full bg-premiumflix-red rounded-full"
-              style={{ width: `${progressPct}%` }}
+              style={{ width: `${isSeekDragging ? seekPreviewPct : progressPct}%` }}
             />
             <div
               className="absolute top-1/2 -translate-y-1/2 w-4 h-4 sm:w-3 sm:h-3 bg-premiumflix-red rounded-full opacity-100 sm:opacity-0 sm:group-hover/seek:opacity-100 transition-opacity shadow-lg"
-              style={{ left: `${progressPct}%`, transform: 'translate(-50%, -50%)' }}
+              style={{ left: `${isSeekDragging ? seekPreviewPct : progressPct}%`, transform: 'translate(-50%, -50%)' }}
             />
           </div>
 
@@ -1068,21 +1394,23 @@ export function VideoPlayer({
               <FastForward className="w-5 h-5" />
             </button>
 
-            {/* Volume */}
-            <div className="flex items-center gap-1 group/vol flex-shrink-0">
-              <button onClick={toggleMute} className="text-white hover:text-white/70 transition-colors p-1">
-                {isMuted || volume === 0 ? <MuteIcon className="w-5 h-5" /> : <VolumeIcon className="w-5 h-5" />}
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={isMuted ? 0 : volume}
-                onChange={handleVolume}
-                className={`${isMobile ? 'w-16' : 'w-0 group-hover/vol:w-20'} transition-all overflow-hidden accent-white cursor-pointer h-1`}
-              />
-            </div>
+            {/* Volume — hidden on mobile (hardware buttons) */}
+            {!isMobile && (
+              <div className="flex items-center gap-1 group/vol flex-shrink-0">
+                <button onClick={toggleMute} className="text-white hover:text-white/70 transition-colors p-1">
+                  {isMuted || volume === 0 ? <MuteIcon className="w-5 h-5" /> : <VolumeIcon className="w-5 h-5" />}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolume}
+                  className="w-0 group-hover/vol:w-20 transition-all overflow-hidden accent-white cursor-pointer h-1"
+                />
+              </div>
+            )}
 
             {/* Time */}
             <span className="text-white text-[11px] sm:text-sm tabular-nums ml-0.5 sm:ml-1 flex-shrink-0">
@@ -1090,11 +1418,35 @@ export function VideoPlayer({
             </span>
 
             <div className="ml-auto flex items-center gap-1 sm:gap-2 flex-shrink-0">
+              {/* Mobile settings gear */}
+              {isMobile && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeAllMenus()
+                    setMobileMenuContent(settingsMenuContent)
+                  }}
+                  className="text-white/60 hover:text-white transition-colors p-1"
+                  title="Settings"
+                >
+                  <SettingsIcon className="w-5 h-5" />
+                </button>
+              )}
+
               {/* Subtitles */}
               {(hlsSubTracks.length > 0 || (subtitles && subtitles.length > 0) || (openSubtitles && openSubtitles.length > 0)) && (
                 <div className="relative">
                   <button
-                    onClick={(e) => { e.stopPropagation(); setShowSubMenu((v) => !v); setShowLangMenu(false); setShowQualityMenu(false); setShowSpeedMenu(false) }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (isMobile) {
+                        closeAllMenus()
+                        setMobileMenuContent(subtitleMenuContent)
+                      } else {
+                        setShowSubMenu((v) => !v)
+                        setShowLangMenu(false); setShowQualityMenu(false); setShowSpeedMenu(false)
+                      }
+                    }}
                     className={`flex items-center gap-1 text-xs font-medium px-1.5 sm:px-2 py-1 rounded border transition-colors ${
                       activeSubtitle || activeHlsSub >= 0
                         ? 'text-white border-white/60 bg-white/10'
@@ -1626,6 +1978,14 @@ function AirPlayIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
       <path d="M6 22h12l-6-6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" />
+    </svg>
+  )
+}
+
+function BrightnessIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zm0-10c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z" />
     </svg>
   )
 }
