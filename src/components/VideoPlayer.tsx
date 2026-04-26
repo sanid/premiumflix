@@ -536,16 +536,35 @@ export function VideoPlayer({
   // ─── Fullscreen ──────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const onChange = () => setIsFullscreen(!!document.fullscreenElement)
+    const onChange = () => {
+      const fsEl = document.fullscreenElement || (document as unknown as Record<string, Element | null>).webkitFullscreenElement || (document as unknown as Record<string, Element | null>).webkitCurrentFullScreenElement
+      setIsFullscreen(!!fsEl)
+    }
     document.addEventListener('fullscreenchange', onChange)
-    return () => document.removeEventListener('fullscreenchange', onChange)
+    document.addEventListener('webkitfullscreenchange', onChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange)
+      document.removeEventListener('webkitfullscreenchange', onChange)
+    }
   }, [])
 
   function toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen()
+    // Try standard Fullscreen API on the container
+    if (!document.fullscreenElement && !(document as unknown as Record<string, Element | null>).webkitFullscreenElement) {
+      const container = containerRef.current
+      if (container) {
+        const req = container.requestFullscreen || (container as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen
+        if (req) {
+          req.call(container).catch(() => {})
+        } else {
+          // Fallback: iOS Safari — fullscreen on the video element itself
+          const video = videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null
+          video?.webkitEnterFullscreen?.()
+        }
+      }
     } else {
-      document.exitFullscreen()
+      const exit = document.exitFullscreen || (document as unknown as Record<string, (() => Promise<void>) | undefined>).webkitExitFullscreen
+      exit?.call(document).catch(() => {})
     }
   }
 
@@ -782,11 +801,48 @@ export function VideoPlayer({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-black select-none touch-none"
+      className="relative w-full h-full bg-black select-none"
       style={{ cursor: showControls ? 'default' : 'none' }}
       onMouseMove={showControlsTemporarily}
+      onTouchEnd={(e) => {
+        // Only handle taps directly on the container (not on buttons/controls)
+        const target = e.target as HTMLElement
+        if (target !== containerRef.current && target !== videoRef.current && !target.closest('video')) return
+
+        const now = Date.now()
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+        const touch = e.changedTouches[0]
+        if (!touch) return
+        const x = touch.clientX - rect.left
+        const isLeft = x < rect.width / 2.5
+        const isRight = x > (rect.width * 1.5) / 2.5
+
+        if (isLeft || isRight) {
+          if (now - lastTapRef.current < 350 && Math.abs(x - lastTapXRef.current) < 80) {
+            // Double tap to seek
+            e.preventDefault()
+            const video = videoRef.current
+            if (video) {
+              const skip = isLeft ? -10 : 10
+              video.currentTime = Math.max(0, Math.min(video.currentTime + skip, video.duration))
+              setTapFeedback({ side: isLeft ? 'left' : 'right', count: 2 })
+              if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current)
+              tapTimeoutRef.current = setTimeout(() => setTapFeedback(null), 600)
+            }
+            lastTapRef.current = 0
+            return
+          }
+        }
+        lastTapRef.current = now
+        lastTapXRef.current = x
+        togglePlay()
+      }}
       onClick={(e) => {
-        // Double-tap to seek on mobile (touch) or desktop
+        // Only handle clicks directly on the container/video (desktop)
+        const target = e.target as HTMLElement
+        if (target !== containerRef.current && target !== videoRef.current && !target.closest('video')) return
+
+        // Double-click to seek on desktop
         const now = Date.now()
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
         const x = e.clientX - rect.left
@@ -794,8 +850,7 @@ export function VideoPlayer({
         const isRight = x > (rect.width * 1.5) / 2.5
 
         if (isLeft || isRight) {
-          if (now - lastTapRef.current < 350 && Math.abs(x - lastTapXRef.current) < 60) {
-            // Double tap
+          if (now - lastTapRef.current < 350 && Math.abs(x - lastTapXRef.current) < 80) {
             const video = videoRef.current
             if (video) {
               const skip = isLeft ? -10 : 10
