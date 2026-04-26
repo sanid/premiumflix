@@ -14,10 +14,21 @@ export interface SceneNzbItem {
   codec?: string
 }
 
-const API_URL = import.meta.env.DEV ? '/scenenzbsapi/api' : '/scenenzbsapi/api'
+// Route through server-side proxy — key is never exposed to the browser.
+// Dev: Vite proxy at /scenenzbsapi → scenenzbs.com
+// Prod: Vercel serverless function at /api/scenenzbs
+const API_URL = import.meta.env.DEV
+  ? '/scenenzbsapi/api'
+  : '/api/scenenzbs'
 
 function getApiKey(): string {
-  return localStorage.getItem('scenenzbs_api_key') || import.meta.env.VITE_SCENENZBS_API_KEY || '631f4d3289850a4577c6f1d58cdaa2b3'
+  // Only used in dev with the Vite proxy (key sent directly to scenenzbs.com).
+  // In production the Vercel function adds the key server-side.
+  const key = import.meta.env.VITE_SCENENZBS_API_KEY || ''
+  if (import.meta.env.DEV && !key) {
+    console.warn('SceneNZBs: VITE_SCENENZBS_API_KEY not set in .env')
+  }
+  return key
 }
 
 function parseTitleInfo(title: string) {
@@ -37,16 +48,26 @@ function parseTitleInfo(title: string) {
 
 export async function searchSceneNzbs(params: Record<string, string>): Promise<SceneNzbItem[]> {
   const url = new URL(API_URL, window.location.href)
-  url.searchParams.set('apikey', getApiKey())
+  // In dev (Vite proxy) we still need to send the key directly.
+  // In prod the Vercel function injects it server-side.
+  if (import.meta.env.DEV) {
+    url.searchParams.set('apikey', getApiKey())
+  }
   url.searchParams.set('o', 'json')
-  
+
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v)
   }
 
   const res = await fetch(url.toString())
   if (!res.ok) throw new Error(`SceneNZBs HTTP ${res.status}`)
-  
+
+  const ct = res.headers.get('content-type') || ''
+  if (!ct.includes('json') && !ct.includes('xml')) {
+    const text = await res.text()
+    throw new Error(`SceneNZBs returned non-JSON response (HTML page). Check your API key.`)
+  }
+
   const data = await res.json()
   if (data.error) throw new Error(data.error.description || 'SceneNZB error')
 
@@ -115,15 +136,15 @@ export async function searchMovieNzb(queryOrId: string | number): Promise<SceneN
 
 export async function searchShowNzb(queryOrId: string | number, season?: number, episode?: number): Promise<SceneNzbItem[]> {
   const params: Record<string, string> = { t: 'tvsearch' }
-  
+
   if (typeof queryOrId === 'number' || /^\d+$/.test(queryOrId.toString())) {
     params.tmdbid = queryOrId.toString()
   } else if (queryOrId) {
     params.q = queryOrId.toString()
   }
-  
+
   if (season !== undefined) params.season = season.toString()
   if (episode !== undefined) params.episode = episode.toString()
-  
+
   return searchSceneNzbs(params)
 }

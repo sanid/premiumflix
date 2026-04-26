@@ -20,6 +20,24 @@
     margin: 0;
     padding: 0;
     overflow-x: hidden;
+    /* Prevent overscroll bounce on iOS */
+    overscroll-behavior: none;
+  }
+
+  /* Safe area insets for notched phones */
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Video player fullscreen safe areas */
+  :fullscreen .safe-top {
+    padding-top: max(env(safe-area-inset-top, 0px), 8px);
+  }
+  :fullscreen .safe-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
   }
 
   /* Hide scrollbars globally for row scrolling */
@@ -72,6 +90,25 @@
   }
   video {
     outline: none;
+  }
+
+  /* Prevent iOS rubber-band scrolling in player */
+  .fixed.inset-0 {
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: auto;
+  }
+
+  /* Larger touch targets on mobile for player buttons */
+  @media (max-width: 640px) {
+    /* Prevent text selection / callouts in player */
+    .select-none {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+    }
+    /* Prevent tap highlight on player controls */
+    .select-none button {
+      -webkit-tap-highlight-color: transparent;
+    }
   }
 
   /* Focus styles */

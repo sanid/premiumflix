@@ -6,6 +6,7 @@ import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl } fr
 interface MovieCardProps {
   movie: Movie
   progressFraction?: number
+  isWatched?: boolean
   onPlay?: () => void
 }
 
@@ -14,7 +15,7 @@ interface ShowCardProps {
   onPlay?: () => void
 }
 
-export function MovieCard({ movie, progressFraction, onPlay }: MovieCardProps) {
+export function MovieCard({ movie, progressFraction, isWatched, onPlay }: MovieCardProps) {
   const navigate = useNavigate()
   const [imgError, setImgError] = useState(false)
   const poster = moviePosterUrl(movie)
@@ -75,6 +76,15 @@ export function MovieCard({ movie, progressFraction, onPlay }: MovieCardProps) {
               className="h-full bg-premiumflix-red transition-all"
               style={{ width: `${progressFraction * 100}%` }}
             />
+          </div>
+        )}
+
+        {/* Watched checkmark */}
+        {isWatched && (
+          <div className="absolute top-2 right-2 bg-black/60 rounded-full w-6 h-6 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
           </div>
         )}
       </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { searchYTS, getMovieTorrents, generateMagnet } from '../services/yts'
 import type { YTSMovie, YTSTorrent } from '../services/yts'
 import { searchMovieNzb, searchShowNzb, type SceneNzbItem } from '../services/scenenzbs'
@@ -8,6 +9,7 @@ import { ingestEpisode } from '../services/autoIngest'
 import { useI18n } from '../contexts/I18nContext'
 import { useLibrary } from '../contexts/LibraryContext'
 import { searchMovieRaw, searchTVRaw } from '../services/metadata'
+import { movieDetail, tvDetail } from '../services/tmdb'
 import type { TMDBMovieDetail } from '../types'
 
 type MediaTypeFilter = 'movie' | 'show'
@@ -15,6 +17,7 @@ type SortDirection = 'asc' | 'desc'
 
 export function AddMovie() {
   const { t } = useI18n()
+  const [urlParams] = useSearchParams()
   const { appendMovieToLibrary, appendShowToLibrary, updateShowInLibrary, monitorTransfer } = useLibrary()
   const [search, setSearch] = useState('')
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('movie')
@@ -142,8 +145,9 @@ export function AddMovie() {
             const label = phase === 'loading' ? `Loading into cloud ${pct}%` : `Downloading ${pct}%`
             setStatusMsg(prev => ({ ...prev, [itemId]: label }))
           }
-        } catch {
+        } catch (e) {
           // network hiccup - keep trying
+          console.warn('Transfer poll error:', e)
         }
         await new Promise(r => setTimeout(r, 3000))
       }
@@ -155,6 +159,46 @@ export function AddMovie() {
   useEffect(() => {
     fetchMedia(search, mediaType, source)
   }, [])
+
+  // Auto-select from URL params (e.g. /add-movie?tmdbId=12345&type=movie)
+  useEffect(() => {
+    const tmdbIdStr = urlParams.get('tmdbId')
+    const type = urlParams.get('type')
+    if (!tmdbIdStr) return
+    const tmdbId = parseInt(tmdbIdStr, 10)
+    if (isNaN(tmdbId)) return
+
+    const mediaTypeParam: MediaTypeFilter = type === 'tv' ? 'show' : 'movie'
+    setMediaType(mediaTypeParam)
+    setSource('usenet')
+
+    // Fetch TMDB detail + NZB releases
+    setLoading(true)
+    const fetchDetail = mediaTypeParam === 'movie' ? movieDetail : tvDetail
+    const searchNzb = mediaTypeParam === 'movie' ? searchMovieNzb : searchShowNzb
+
+    // Fetch TMDB detail first (required)
+    fetchDetail(tmdbId)
+      .then((detail) => {
+        const item = detail as TMDBMovieDetail
+        setSelectedTmdbItem(item)
+        setSearch(item.title || item.name || '')
+        // Then search for NZBs (best-effort — key may not be configured)
+        setLoadingTorrents(true)
+        return searchNzb(tmdbId)
+          .then((nzbData) => { setNzbItems(nzbData) })
+          .catch((e) => {
+            console.warn('NZB search failed:', e.message)
+            // Non-fatal — user can still search manually
+          })
+          .finally(() => { setLoadingTorrents(false) })
+      })
+      .then(() => { setLoading(false) })
+      .catch((e) => {
+        console.error('Failed to load TMDB detail:', e)
+        setLoading(false)
+      })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {

@@ -10,7 +10,7 @@ import {
   getSeasonDetail,
 } from '../services/metadata'
 import { bestLogoPath, bestTrailerKey } from '../services/tmdb'
-import { db, getAllProgress } from '../db'
+import { getAllProgress } from '../db'
 import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl, formatFileSize } from '../types'
 import type { Movie, TVShow, TMDBMovie, WatchProgress } from '../types'
 
@@ -115,10 +115,8 @@ export function Management() {
           try { await deleteFolder(item.id) } catch { try { await deleteItem(item.id) } catch { /* may not exist */ } }
           const updated = { ...item, cloudRemoved: true }
           if (tab === 'movies') {
-            await db.movies.update(item.id, { cloudRemoved: true })
             updateMovieInLibrary(updated as Movie)
           } else {
-            await db.tvShows.update(item.id, { cloudRemoved: true })
             updateShowInLibrary(updated as TVShow)
           }
         }
@@ -171,7 +169,6 @@ export function Management() {
       monitorTransfer(transfer.id, best.title, { tmdbId, type: tab === 'movies' ? 'movie' : 'show' as const })
 
       // Mark as no longer cloud-removed
-      await db.movies.update(item.id, { cloudRemoved: false })
       const updated = { ...item, cloudRemoved: false }
       if (tab === 'movies') updateMovieInLibrary(updated as Movie)
       else updateShowInLibrary(updated as TVShow)
@@ -540,7 +537,7 @@ function MetadataEditor({ item, mediaType, onClose, onUpdated }: MetadataEditorP
 
       const updates: any = { tmdbId: detail.id, tmdbDetail: detail, trailerKey, logoPath }
       if (isMovie) {
-        await db.movies.update(item.id, updates)
+        // DB write handled by updateMovieInLibrary callback
       } else {
         // For TV shows, also fetch and assign episode metadata
         const show = item as TVShow
@@ -558,7 +555,7 @@ function MetadataEditor({ item, mediaType, onClose, onUpdated }: MetadataEditorP
           }
         }))
         updates.seasons = updatedSeasons
-        await db.tvShows.update(item.id, updates)
+        // DB write handled by updateShowInLibrary callback
       }
       onUpdated({ ...item, ...updates } as Movie | TVShow)
     } catch (e) { setError('Apply failed: ' + (e instanceof Error ? e.message : 'unknown')) }

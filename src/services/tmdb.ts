@@ -7,6 +7,8 @@ import type {
   TMDBSeasonDetail,
   TMDBMovie,
   TMDBImageInfo,
+  TMDBPersonDetail,
+  TMDBPersonCredits,
 } from '../types'
 
 // When VITE_TMDB_USE_PROXY=true, requests go through api/tmdb/[...path].ts (Vercel Edge Function)
@@ -95,6 +97,16 @@ export async function similarMovies(id: number): Promise<TMDBSearchResult> {
 
 export async function similarTV(id: number): Promise<TMDBSearchResult> {
   return tmdbFetch<TMDBSearchResult>(`tv/${id}/similar`)
+}
+
+// ─── Person ─────────────────────────────────────────────────────────────────
+
+export async function personDetail(id: number): Promise<TMDBPersonDetail> {
+  return tmdbFetch<TMDBPersonDetail>(`person/${id}`)
+}
+
+export async function personCredits(id: number): Promise<TMDBPersonCredits> {
+  return tmdbFetch<TMDBPersonCredits>(`person/${id}/combined_credits`)
 }
 
 // ─── Best-match search logic ──────────────────────────────────────────────────

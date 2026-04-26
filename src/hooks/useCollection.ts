@@ -18,23 +18,31 @@ export function useCollection() {
   }, [])
 
   const toggleFavorite = useCallback(async (id: string, type: 'movie' | 'show') => {
-    await dbToggleFavorite(id, type)
-    setFavoriteIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+    try {
+      await dbToggleFavorite(id, type)
+      setFavoriteIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+    } catch (e) {
+      console.error('toggleFavorite failed:', e)
+    }
   }, [])
 
   const toggleWatchlist = useCallback(async (id: string, type: 'movie' | 'show') => {
-    await dbToggleWatchlist(id, type)
-    setWatchlistIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+    try {
+      await dbToggleWatchlist(id, type)
+      setWatchlistIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+    } catch (e) {
+      console.error('toggleWatchlist failed:', e)
+    }
   }, [])
 
   return {

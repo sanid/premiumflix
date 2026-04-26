@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import type { Movie, TVShow, ScanFolderSelection } from '../types'
 import { scanLibrary, type ScanProgress } from '../services/scanner'
-import { saveLibrary, loadLibrary, clearLibrary, appendMovie, appendTVShow, deleteMovie, deleteTVShow } from '../db'
+import { saveLibrary, loadLibrary, clearLibrary, appendMovie, appendTVShow, deleteMovie, deleteTVShow, toggleFavorite as dbToggleFavorite, toggleWatchlist as dbToggleWatchlist, getFavoriteIds, getWatchlistIds } from '../db'
 import { ingestItem, ingestEpisode } from '../services/autoIngest'
 import { listTransfers } from '../services/premiumize'
 import { syncLibraryToCloud, loadLibraryFromCloud } from '../services/cloudSync'
@@ -25,6 +25,12 @@ interface LibraryContextValue {
   notifications: string[]
   dismissNotification: (index: number) => void
   restoreFromCloud: () => Promise<boolean>
+  favoriteIds: Set<string>
+  watchlistIds: Set<string>
+  isFavorite: (id: string) => boolean
+  isOnWatchlist: (id: string) => boolean
+  toggleFavorite: (id: string, type: 'movie' | 'show') => Promise<void>
+  toggleWatchlist: (id: string, type: 'movie' | 'show') => Promise<void>
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null)
@@ -40,6 +46,17 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
 
   const [notifications, setNotifications] = useState<string[]>([])
   const [pendingTransfers, setPendingTransfers] = useState<{ id: string; name: string; tmdbId?: number; type?: 'movie' | 'show'; season?: number; episode?: number }[]>([])
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
+  const [watchlistIds, setWatchlistIds] = useState<Set<string>>(new Set())
+
+  // Auto-dismiss notifications after 8s
+  useEffect(() => {
+    if (notifications.length === 0) return
+    const timer = setTimeout(() => {
+      setNotifications(prev => prev.length <= 3 ? [] : prev.slice(3))
+    }, 8000)
+    return () => clearTimeout(timer)
+  }, [notifications])
 
   // Load from IndexedDB and localStorage on mount
   useEffect(() => {
@@ -51,21 +68,22 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     try {
       const stored = localStorage.getItem('pending_transfers')
       if (stored) setPendingTransfers(JSON.parse(stored))
-    } catch {}
+    } catch { /* corrupt localStorage — ignore */ }
   }, [])
 
-  // Auto-sync to cloud when library changes (debounced)
+  // Auto-sync to cloud when library changes (debounced 60s, skip if empty)
   useEffect(() => {
     if (!initialized) return
+    if (movies.length === 0 && tvShows.length === 0) return
     const timer = setTimeout(() => {
       syncLibraryToCloud(movies, tvShows).catch(() => {
-        // Silently fail or log, don't block UI
+        // Silently fail — don't block UI
       })
-    }, 30000) // Sync every 30s after changes
+    }, 60000)
     return () => clearTimeout(timer)
   }, [movies, tvShows, initialized])
 
-  // Poll pending transfers
+  // Poll pending transfers (only when there are any)
   useEffect(() => {
     if (pendingTransfers.length === 0) return
     
@@ -102,6 +120,10 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
           setPendingTransfers(prev => {
             const next = prev.filter(p => !completed.includes(p.id))
             localStorage.setItem('pending_transfers', JSON.stringify(next))
+            // Clean up consumed metadata hints
+            if (next.length === 0) {
+              try { localStorage.removeItem('metadata_hints') } catch { /* ignore */ }
+            }
             return next
           })
           
@@ -222,10 +244,12 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
 
   const updateMovieInLibrary = useCallback((movie: Movie) => {
     setMovies(prev => prev.map(m => m.id === movie.id ? movie : m))
+    appendMovie(movie).catch(e => console.error('Failed to persist movie update', e))
   }, [])
 
   const updateShowInLibrary = useCallback((show: TVShow) => {
     setTVShows(prev => prev.map(s => s.id === show.id ? show : s))
+    appendTVShow(show).catch(e => console.error('Failed to persist show update', e))
   }, [])
 
   const restoreFromCloud = useCallback(async () => {
@@ -252,6 +276,38 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // Load favorites/watchlist from DB on mount
+  useEffect(() => {
+    Promise.all([getFavoriteIds(), getWatchlistIds()]).then(([fav, wl]) => {
+      setFavoriteIds(fav)
+      setWatchlistIds(wl)
+    })
+  }, [])
+
+  const handleToggleFavorite = useCallback(async (id: string, type: 'movie' | 'show') => {
+    try {
+      await dbToggleFavorite(id, type)
+      setFavoriteIds(prev => {
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+    } catch (e) { console.error('toggleFavorite failed:', e) }
+  }, [])
+
+  const handleToggleWatchlist = useCallback(async (id: string, type: 'movie' | 'show') => {
+    try {
+      await dbToggleWatchlist(id, type)
+      setWatchlistIds(prev => {
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+    } catch (e) { console.error('toggleWatchlist failed:', e) }
+  }, [])
+
   return (
     <LibraryContext.Provider
       value={{
@@ -273,6 +329,12 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
         notifications,
         dismissNotification,
         restoreFromCloud,
+        favoriteIds,
+        watchlistIds,
+        isFavorite: (id: string) => favoriteIds.has(id),
+        isOnWatchlist: (id: string) => watchlistIds.has(id),
+        toggleFavorite: handleToggleFavorite,
+        toggleWatchlist: handleToggleWatchlist,
       }}
     >
       {children}

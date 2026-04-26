@@ -3,6 +3,7 @@ import { listFolder, itemDetails } from './premiumize'
 import { processFolder, fetchMovieMeta, fetchShowMeta } from './scanner'
 import { db } from '../db'
 import { isTMDB, searchTVBest } from '../services/metadata'
+import { debugLog } from '../lib/debug'
 import { tvDetail as tmdbTVDetail, bestLogoPath, bestTrailerKey } from './tmdb'
 import { getVideos, getImages, getSeasonDetail as metaSeasonDetail } from '../services/metadata'
 
@@ -89,7 +90,7 @@ async function findVideoFile(itemId: string, retries = 5): Promise<{ file: Media
       if (contents.length === 0) {
         // Folder not populated yet — wait and retry
         if (attempt < retries - 1) {
-          console.log(`ingestEpisode: folder empty, retrying (${attempt + 1}/${retries})...`)
+          debugLog(`ingestEpisode: folder empty, retrying (${attempt + 1}/${retries})...`)
           await new Promise(r => setTimeout(r, 3000))
           continue
         }
@@ -164,7 +165,7 @@ export async function ingestEpisode(
   seasonNum?: number,
   episodeNum?: number,
 ): Promise<{ show: TVShow; isNew: boolean } | null> {
-  console.log('ingestEpisode called:', { itemId, tmdbId, seasonNum, episodeNum })
+  debugLog('ingestEpisode called:', { itemId, tmdbId, seasonNum, episodeNum })
 
   try {
     // 1. Find the video file (with retries for empty folders)
@@ -180,7 +181,7 @@ export async function ingestEpisode(
     mediaFile.seasonNumber = sn
     mediaFile.episodeNumber = en
 
-    console.log('ingestEpisode: found video', mediaFile.fileName, `S${sn}E${en}`)
+    debugLog('ingestEpisode: found video', mediaFile.fileName, `S${sn}E${en}`)
 
     // 2. Look for an existing show in the library with this tmdbId
     const existingShows = await db.tvShows.toArray()
@@ -188,7 +189,7 @@ export async function ingestEpisode(
     let isNew = false
 
     if (!show) {
-      console.log('ingestEpisode: no existing show for tmdbId', tmdbId, '- creating new')
+      debugLog('ingestEpisode: no existing show for tmdbId', tmdbId, '- creating new')
       // 3. Create a new stub show with TMDB metadata
       let detail = null
       try {
@@ -223,7 +224,7 @@ export async function ingestEpisode(
 
       isNew = true
     } else {
-      console.log('ingestEpisode: found existing show', show.title, 'with', show.seasons.length, 'seasons')
+      debugLog('ingestEpisode: found existing show', show.title, 'with', show.seasons.length, 'seasons')
     }
 
     // 4. Add the episode to the correct season
@@ -241,9 +242,9 @@ export async function ingestEpisode(
       if (!existingEp) {
         show.seasons[seasonIdx].episodes.push(episode)
         show.seasons[seasonIdx].episodes.sort((a, b) => a.number - b.number)
-        console.log(`ingestEpisode: added S${sn}E${en} to existing season (${show.seasons[seasonIdx].episodes.length} eps)`)
+        debugLog(`ingestEpisode: added S${sn}E${en} to existing season (${show.seasons[seasonIdx].episodes.length} eps)`)
       } else {
-        console.log(`ingestEpisode: S${sn}E${en} already exists, skipping`)
+        debugLog(`ingestEpisode: S${sn}E${en} already exists, skipping`)
       }
     } else {
       // Create new season
@@ -255,7 +256,7 @@ export async function ingestEpisode(
       }
       show.seasons.push(season)
       show.seasons.sort((a, b) => a.number - b.number)
-      console.log(`ingestEpisode: created Season ${sn} with E${en}`)
+      debugLog(`ingestEpisode: created Season ${sn} with E${en}`)
     }
 
     // 5. Try to fetch TMDB episode metadata
@@ -285,10 +286,10 @@ export async function ingestEpisode(
     // 6. Save to DB
     if (isNew) {
       await db.tvShows.add(show)
-      console.log('ingestEpisode: saved new show to DB')
+      debugLog('ingestEpisode: saved new show to DB')
     } else {
       await db.tvShows.update(show.id, show)
-      console.log('ingestEpisode: updated show in DB')
+      debugLog('ingestEpisode: updated show in DB')
     }
 
     return { show, isNew }

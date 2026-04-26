@@ -47,6 +47,11 @@ export async function pmPost<T>(path: string, body: Record<string, string> = {})
   return data as T
 }
 
+// ─── Shared folder name detection ────────────────────────────────────────────
+
+export const MOVIE_FOLDER_NAMES = new Set(['Movies', 'Movie', 'Filme', 'Film', 'Films', 'Películas'])
+export const SERIES_FOLDER_NAMES = new Set(['Series', 'TV Shows', 'TV', 'Shows', 'Serien', 'Serie', 'Serier', 'TV Series'])
+
 export async function listFolder(id?: string): Promise<PMFolderListResponse> {
   const params: Record<string, string> = { includebreadcrumbs: 'true' }
   if (id) params.id = id
@@ -137,7 +142,7 @@ export async function getOrCreateMoviesFolder(): Promise<string | undefined> {
     console.error('Failed to parse scan_folders', e)
   }
 
-  const MOVIE_NAMES = new Set(['Movies', 'Movie', 'Filme', 'Film', 'Films', 'Películas'])
+  const MOVIE_NAMES = MOVIE_FOLDER_NAMES
   try {
     const root = await listFolder()
     const moviesFolder = root.content?.find(item => item.type === 'folder' && MOVIE_NAMES.has(item.name))
@@ -166,7 +171,7 @@ export async function getOrCreateShowsFolder(): Promise<string | undefined> {
     console.error('Failed to parse scan_folders', e)
   }
 
-  const SHOW_NAMES = new Set(['Series', 'TV Shows', 'TV', 'Shows', 'Serien', 'Serie', 'Serier', 'TV Series'])
+  const SHOW_NAMES = SERIES_FOLDER_NAMES
   try {
     const root = await listFolder()
     const showsFolder = root.content?.find(item => item.type === 'folder' && SHOW_NAMES.has(item.name))

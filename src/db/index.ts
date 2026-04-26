@@ -21,8 +21,16 @@ class PremiumflixDB extends Dexie {
   watchlist!: Table<WatchlistRecord>
 
   constructor() {
-    super('PremiumflixDB')
+    super('NotflixDB')
     this.version(1).stores({
+      movies: 'id, title, addedAt, tmdbId',
+      tvShows: 'id, title, tmdbId',
+      watchProgress: 'fileId, lastWatched',
+      favorites: 'id, type, addedAt',
+      watchlist: 'id, type, addedAt',
+    })
+    // Upgrade from older schemas that may not have had these tables
+    this.version(2).stores({
       movies: 'id, title, addedAt, tmdbId',
       tvShows: 'id, title, tmdbId',
       watchProgress: 'fileId, lastWatched',

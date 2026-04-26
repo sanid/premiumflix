@@ -4,7 +4,7 @@
  * and enriches them with TMDB metadata.
  */
 import type { Movie, TVShow, Season, Episode, MediaFile, SubtitleTrack, PMItem, ScanFolderSelection } from '../types'
-import { listFolder } from './premiumize'
+import { listFolder, MOVIE_FOLDER_NAMES, SERIES_FOLDER_NAMES } from './premiumize'
 import { bestLogoPath, bestTrailerKey, movieDetail as tmdbMovieDetail, tvDetail as tmdbTVDetail } from './tmdb'
 import {
   isTMDB,
@@ -300,8 +300,8 @@ export async function scanLibrary(
 }
 
 async function autoDetectRoots(): Promise<ScanFolderSelection[]> {
-  const MOVIE_NAMES = new Set(['Movies', 'Movie', 'Filme', 'Film', 'Films', 'Películas'])
-  const SERIES_NAMES = new Set(['Series', 'TV Shows', 'TV', 'Shows', 'Serien', 'Serie', 'Serier', 'TV Series'])
+  const MOVIE_NAMES = MOVIE_FOLDER_NAMES
+  const SERIES_NAMES = SERIES_FOLDER_NAMES
 
   const root = await listFolder()
   const result: ScanFolderSelection[] = []

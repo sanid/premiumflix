@@ -169,6 +169,41 @@ export interface TMDBCrewMember {
   profile_path?: string
 }
 
+export interface TMDBPersonDetail {
+  id: number
+  name: string
+  biography?: string
+  birthday?: string
+  deathday?: string
+  place_of_birth?: string
+  profile_path?: string
+  known_for_department?: string
+  homepage?: string
+}
+
+export interface TMDBPersonCredit {
+  id: number
+  title?: string          // movie
+  name?: string           // TV show
+  media_type: 'movie' | 'tv'
+  poster_path?: string
+  release_date?: string   // movie
+  first_air_date?: string // TV show
+  vote_average?: number
+  genre_ids?: number[]
+  overview?: string
+  character?: string
+  job?: string
+  episode_count?: number  // TV recurring/guest
+  order?: number          // movie cast order
+}
+
+export interface TMDBPersonCredits {
+  id: number
+  cast: TMDBPersonCredit[]
+  crew: TMDBPersonCredit[]
+}
+
 export interface TMDBVideo {
   id: string
   key: string
@@ -318,6 +353,12 @@ export function profileUrl(path?: string | null): string | undefined {
   if (!path) return undefined
   if (path.startsWith('http')) return path
   return `https://image.tmdb.org/t/p/w185${path}`
+}
+
+export function profileUrlLarge(path?: string | null): string | undefined {
+  if (!path) return undefined
+  if (path.startsWith('http')) return path
+  return `https://image.tmdb.org/t/p/h632${path}`
 }
 
 export function stillUrl(path?: string | null): string | undefined {

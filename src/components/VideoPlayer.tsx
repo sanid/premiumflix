@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import Hls from 'hls.js'
 import type { SubtitleTrack } from '../types'
 import type { PMSubtitle } from '../services/premiumize'
+import { debugLog } from '../lib/debug'
 
 interface VideoPlayerProps {
   src: string
@@ -13,6 +14,8 @@ interface VideoPlayerProps {
   onProgress?: (position: number, duration: number) => void
   onBack?: () => void
   onEnded?: () => void
+  onNextEpisode?: () => void
+  nextEpisodeLabel?: string
 }
 
 export function VideoPlayer({
@@ -25,6 +28,8 @@ export function VideoPlayer({
   onProgress,
   onBack,
   onEnded,
+  onNextEpisode,
+  nextEpisodeLabel,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -56,9 +61,49 @@ export function VideoPlayer({
   const [hlsSubTracks, setHlsSubTracks] = useState<{ id: number; name: string; lang: string }[]>([])
   const [activeHlsSub, setActiveHlsSub] = useState<number>(-1)
   const [showSubMenu, setShowSubMenu] = useState(false)
+  const userSubOffRef = useRef(false) // tracks explicit user "off" intent
 
   // OpenSubtitles state
   const [loadingOpenSub, setLoadingOpenSub] = useState<string | null>(null) // dl_link being loaded
+
+  // ─── Quality levels ────────────────────────────────────────────────────
+  const [levels, setLevels] = useState<{ width: number; height: number; bitrate: number }[]>([])
+  const [currentLevel, setCurrentLevel] = useState(-1)
+  const [autoLevel, setAutoLevel] = useState(true)
+  const [showQualityMenu, setShowQualityMenu] = useState(false)
+
+  // ─── Playback speed ────────────────────────────────────────────────────
+  const [playbackRate, setPlaybackRate] = useState(1)
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false)
+
+  // ─── Next episode countdown ─────────────────────────────────────────────
+  const [showNextUp, setShowNextUp] = useState(false)
+  const [nextUpCountdown, setNextUpCountdown] = useState(10)
+  const nextUpTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // ─── Mobile double-tap ──────────────────────────────────────────────────
+  const lastTapRef = useRef(0)
+  const lastTapXRef = useRef(0)
+  const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [tapFeedback, setTapFeedback] = useState<{ side: 'left' | 'right'; count: number } | null>(null)
+
+  // ─── Mobile detection ────────────────────────────────────────────────────
+  const isMobile = useMemo(() => 'ontouchstart' in window || navigator.maxTouchPoints > 0, [])
+
+  // ─── Keyboard shortcut help ──────────────────────────────────────────────
+  const [showHelp, setShowHelp] = useState(false)
+
+  // ─── Storyboard thumbnails ──────────────────────────────────────────────
+  const [thumbnails, setThumbnails] = useState<ThumbCue[]>([])
+  const [hoverTime, setHoverTime] = useState<number | null>(null)
+  const [hoverX, setHoverX] = useState(0)
+  const [hoverImgUrl, setHoverImgUrl] = useState<string | null>(null)
+  const [hoverCrop, setHoverCrop] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+
+  // ─── PiP / Cast / AirPlay ────────────────────────────────────────────────
+  const [pipSupported, setPipSupported] = useState(false)
+  const [isCasting, setIsCasting] = useState(false)
+  const [airplayAvailable, setAirplayAvailable] = useState(false)
 
   // ─── HLS setup ────────────────────────────────────────────────────────────
 
@@ -76,7 +121,7 @@ export function VideoPlayer({
     }
 
     const isHLS = src.includes('.m3u8') || src.includes('stream_link') || src.includes('/stream/')
-    console.log('[Player] Loading source:', src.substring(0, 120) + '...', 'isHLS:', isHLS)
+    debugLog('[Player Loading source:', src.substring(0, 120) + '...', 'isHLS:', isHLS)
 
     if (isHLS && Hls.isSupported()) {
       const hls = new Hls({
@@ -87,6 +132,7 @@ export function VideoPlayer({
       hlsRef.current = hls
       hls.loadSource(src)
       hls.attachMedia(video)
+      hls.subtitleTrack = -1 // don't auto-select subtitles
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
@@ -97,11 +143,13 @@ export function VideoPlayer({
 
       // Detect audio + subtitle tracks from manifest
       hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
-        console.log('[Player] Manifest parsed — levels:', data.levels.length,
+        debugLog('[Player Manifest parsed — levels:', data.levels.length,
           'audio:', hls.audioTracks.length,
           'subs:', hls.subtitleTracks.length)
         if (data.levels.length > 0) {
-          console.log('[Player] Level details:', data.levels.map((l, i) => `${i}: ${l.width}x${l.height} ${l.codecSet}`))
+          debugLog('[Player Level details:', data.levels.map((l, i) => `${i}: ${l.width}x${l.height} ${l.codecSet}`))
+          setLevels(data.levels.map((l) => ({ width: l.width ?? 0, height: l.height ?? 0, bitrate: l.bitrate ?? 0 })))
+          setCurrentLevel(hls.currentLevel)
         }
         if (hls.audioTracks.length > 0) {
           const tracks = hls.audioTracks.map((t, i) => ({
@@ -111,7 +159,7 @@ export function VideoPlayer({
           }))
           setAudioTracks(tracks)
           setActiveAudioTrack(hls.audioTrack)
-          console.log('[Player] Audio tracks:', tracks.length, tracks.map(t => t.lang || t.name))
+          debugLog('[Player Audio tracks:', tracks.length, tracks.map(t => t.lang || t.name))
         }
         if (hls.subtitleTracks.length > 0) {
           const tracks = hls.subtitleTracks.map((t, i) => ({
@@ -120,7 +168,7 @@ export function VideoPlayer({
             lang: t.lang ?? '',
           }))
           setHlsSubTracks(tracks)
-          console.log('[Player] Subtitle tracks:', tracks.length, tracks.map(t => t.lang || t.name))
+          debugLog('[Player Subtitle tracks:', tracks.length, tracks.map(t => t.lang || t.name))
         }
       })
 
@@ -145,11 +193,22 @@ export function VideoPlayer({
           lang: t.lang ?? '',
         }))
         setHlsSubTracks(tracks)
-        console.log('[Player] Subtitle tracks updated:', tracks.length)
+        debugLog('[Player Subtitle tracks updated:', tracks.length)
       })
 
       hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, () => {
-        setActiveHlsSub(hls.subtitleTrack)
+        // Don't re-enable subs if user explicitly turned them off
+        if (!userSubOffRef.current) {
+          setActiveHlsSub(hls.subtitleTrack)
+        }
+      })
+
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => {
+        setCurrentLevel(data.level)
+      })
+
+      hls.on(Hls.Events.LEVELS_UPDATED, (_e, data) => {
+        setLevels(data.levels.map((l) => ({ width: l.width ?? 0, height: l.height ?? 0, bitrate: l.bitrate ?? 0 })))
       })
 
     } else if (isHLS && video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -170,8 +229,77 @@ export function VideoPlayer({
       setActiveAudioTrack(-1)
       setHlsSubTracks([])
       setActiveHlsSub(-1)
+      setLevels([])
+      setCurrentLevel(-1)
+      setAutoLevel(true)
+      userSubOffRef.current = false
     }
   }, [src])
+
+  // ─── Storyboard thumbnails fetch ─────────────────────────────────────────
+  //
+  // CDN77 provides hover thumbnail storyboards for live-transcoded streams.
+  // The manifest is a WebVTT file where each cue contains an image URL (sprite sheet)
+  // with #xywh= crop coordinates.
+
+  useEffect(() => {
+    setThumbnails([])
+    if (!src) return
+
+    let storyboardUrl: string | null = null
+    try {
+      if (src.includes('/vod/') && src.startsWith('http')) {
+        const idx = src.indexOf('/vod/') + 5
+        const directPart = src.substring(idx)
+        const urlObj = new URL(src)
+        const base = `${urlObj.origin}/storyboards/manifest`
+        const params = new URLSearchParams({
+          url: directPart,
+          interval: '15',
+          width: '160',
+          height: '90',
+        })
+        storyboardUrl = `${base}?${params.toString()}`
+      }
+    } catch { /* not a valid URL */ }
+    if (!storyboardUrl) return
+
+    let cancelled = false
+    fetch(storyboardUrl)
+      .then((r) => (r.ok ? r.text() : Promise.reject(`HTTP ${r.status}`)))
+      .then((vtt) => {
+        if (cancelled) return
+        const thumbs = parseStoryboardVtt(vtt, storyboardUrl!)
+        if (thumbs.length > 0) {
+          debugLog('[Player Loaded storyboard:', thumbs.length, 'thumbnails')
+          setThumbnails(thumbs)
+        }
+      })
+      .catch(() => {})
+
+    return () => { cancelled = true }
+  }, [src])
+
+  // ─── PiP / AirPlay support check ──────────────────────────────────────────
+
+  useEffect(() => {
+    setPipSupported('pictureInPictureEnabled' in document)
+    // AirPlay: Safari exposes webkitShowPlaybackTargetPicker on video
+    setAirplayAvailable(!!(document.createElement('video') as HTMLVideoElement & { webkitShowPlaybackTargetPicker?: unknown }).webkitShowPlaybackTargetPicker)
+  }, [])
+
+  // ─── Chromecast init ──────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const w = window as unknown as Record<string, unknown>
+    if (!w.__onGCastApiAvailable) {
+      // Load Cast SDK lazily
+      const s = document.createElement('script')
+      s.src = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1'
+      s.async = true
+      document.head.appendChild(s)
+    }
+  }, [])
 
   // ─── Subtitle visibility enforcement ────────────────────────────────────────
   //
@@ -204,7 +332,7 @@ export function VideoPlayer({
           )
           const isActive = trackIndex === activeHlsSub
           if (isActive && tt.mode !== 'showing') {
-            console.log('[Player] Showing subtitle track:', tt.label, tt.language)
+            debugLog('[Player Showing subtitle track:', tt.label, tt.language)
             tt.mode = 'showing'
           } else if (!isActive && tt.mode === 'showing') {
             tt.mode = 'hidden'
@@ -308,7 +436,12 @@ export function VideoPlayer({
     const onCanPlay = () => setIsLoading(false)
     const handleEnded = () => {
       setIsPlaying(false)
-      onEnded?.()
+      if (onNextEpisode) {
+        setShowNextUp(true)
+        setNextUpCountdown(10)
+      } else {
+        onEnded?.()
+      }
     }
     const onError = () => {
       setError('Playback failed. The stream may have expired — try going back and playing again.')
@@ -359,6 +492,26 @@ export function VideoPlayer({
       }
     }
   }, [onProgress])
+
+  // ─── Next-episode countdown ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!showNextUp) return
+    nextUpTimerRef.current = setInterval(() => {
+      setNextUpCountdown((prev) => {
+        if (prev <= 1) {
+          if (nextUpTimerRef.current) clearInterval(nextUpTimerRef.current)
+          onNextEpisode?.()
+          setShowNextUp(false)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => {
+      if (nextUpTimerRef.current) clearInterval(nextUpTimerRef.current)
+    }
+  }, [showNextUp])
 
   // ─── Control visibility ───────────────────────────────────────────────────
 
@@ -434,8 +587,12 @@ export function VideoPlayer({
         case 'f':
           toggleFullscreen()
           break
+        case '?':
+          setShowHelp((v) => !v)
+          break
         case 'Escape':
-          if (isFullscreen) document.exitFullscreen()
+          if (showHelp) setShowHelp(false)
+          else if (isFullscreen) document.exitFullscreen()
           else onBack?.()
           break
       }
@@ -446,14 +603,44 @@ export function VideoPlayer({
 
   // ─── Seek bar ────────────────────────────────────────────────────────────
 
-  function handleSeekBarClick(e: React.MouseEvent<HTMLDivElement>) {
+  function seekToPosition(clientX: number) {
     const bar = seekBarRef.current
     const video = videoRef.current
-    if (!bar || !video) return
+    if (!bar || !video || !duration) return
     const rect = bar.getBoundingClientRect()
-    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
     video.currentTime = fraction * video.duration
     setCurrentTime(video.currentTime)
+  }
+
+  function handleSeekBarClick(e: React.MouseEvent<HTMLDivElement>) {
+    seekToPosition(e.clientX)
+  }
+
+  function handleSeekBarTouch(e: React.TouchEvent<HTMLDivElement>) {
+    if (e.touches.length > 0) {
+      seekToPosition(e.touches[0].clientX)
+    }
+  }
+
+  function handleSeekBarHover(e: React.MouseEvent<HTMLDivElement>) {
+    const bar = seekBarRef.current
+    if (!bar || !duration) return
+    const rect = bar.getBoundingClientRect()
+    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    const time = fraction * duration
+    setHoverTime(time)
+    setHoverX(e.clientX - rect.left)
+
+    if (thumbnails.length > 0) {
+      let best = thumbnails[0]
+      for (const t of thumbnails) {
+        if (t.time <= time) best = t
+        else break
+      }
+      setHoverImgUrl(best.url)
+      setHoverCrop({ x: best.x, y: best.y, w: best.w, h: best.h })
+    }
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -495,16 +682,136 @@ export function VideoPlayer({
     video.currentTime = Math.max(0, Math.min(video.currentTime + seconds, video.duration))
   }
 
+  function changeQuality(levelIndex: number) {
+    if (!hlsRef.current) return
+    if (levelIndex === -1) {
+      hlsRef.current.currentLevel = -1
+      setAutoLevel(true)
+    } else {
+      hlsRef.current.currentLevel = levelIndex
+      setAutoLevel(false)
+    }
+    setShowQualityMenu(false)
+  }
+
+  function changeSpeed(rate: number) {
+    const video = videoRef.current
+    if (!video) return
+    video.playbackRate = rate
+    setPlaybackRate(rate)
+    setShowSpeedMenu(false)
+  }
+
+  function levelLabel(h: number): string {
+    if (h >= 2160) return '4K'
+    if (h >= 1440) return '1440p'
+    if (h >= 1080) return '1080p'
+    if (h >= 720) return '720p'
+    if (h >= 480) return '480p'
+    if (h >= 360) return '360p'
+    return `${h}p`
+  }
+
+  async function togglePiP() {
+    const video = videoRef.current
+    if (!video) return
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture()
+      } else {
+        await video.requestPictureInPicture()
+      }
+    } catch { /* PiP not supported or denied */ }
+  }
+
+  function triggerAirPlay() {
+    const video = videoRef.current as (HTMLVideoElement & { webkitShowPlaybackTargetPicker?: () => void }) | null
+    video?.webkitShowPlaybackTargetPicker?.()
+  }
+
+  async function startChromecast() {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any
+      const castCtx = w.cast?.framework?.CastContext?.getInstance?.()
+      if (!castCtx) return
+
+      const session = castCtx.getCurrentSession?.()
+      if (session) {
+        session.end?.(true)
+        setIsCasting(false)
+        return
+      }
+
+      castCtx.setOptions?.({
+        receiverApplicationId: 'CC1AD845',
+        autoJoinPolicy: 'origin_scoped',
+      })
+      await castCtx.requestSession?.()
+
+      // Session started — load media
+      const currentSession = castCtx.getCurrentSession?.()
+      if (currentSession && src) {
+        const MediaInfo = w.chrome?.cast?.media?.MediaInfo
+        const GenericMetadata = w.chrome?.cast?.media?.GenericMediaMetadata
+        const LoadRequest = w.chrome?.cast?.media?.LoadRequest
+        if (MediaInfo) {
+          const mediaInfo = new MediaInfo(src, 'application/x-mpegurl')
+          mediaInfo.streamType = 'BUFFERED'
+          if (GenericMetadata) {
+            const metadata = new GenericMetadata()
+            metadata.metadataType = 0
+            metadata.title = title
+            mediaInfo.metadata = metadata
+          }
+          if (LoadRequest) {
+            const request = new LoadRequest(mediaInfo)
+            await currentSession.loadMedia?.(request)
+            setIsCasting(true)
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Player] Chromecast error:', err)
+    }
+  }
+
   const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0
   const bufferedPct = duration > 0 ? (buffered / duration) * 100 : 0
 
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-black select-none"
+      className="relative w-full h-full bg-black select-none touch-none"
       style={{ cursor: showControls ? 'default' : 'none' }}
       onMouseMove={showControlsTemporarily}
-      onClick={togglePlay}
+      onClick={(e) => {
+        // Double-tap to seek on mobile (touch) or desktop
+        const now = Date.now()
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const isLeft = x < rect.width / 2.5
+        const isRight = x > (rect.width * 1.5) / 2.5
+
+        if (isLeft || isRight) {
+          if (now - lastTapRef.current < 350 && Math.abs(x - lastTapXRef.current) < 60) {
+            // Double tap
+            const video = videoRef.current
+            if (video) {
+              const skip = isLeft ? -10 : 10
+              video.currentTime = Math.max(0, Math.min(video.currentTime + skip, video.duration))
+              setTapFeedback({ side: isLeft ? 'left' : 'right', count: 2 })
+              if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current)
+              tapTimeoutRef.current = setTimeout(() => setTapFeedback(null), 600)
+            }
+            lastTapRef.current = 0
+            return
+          }
+        }
+        lastTapRef.current = now
+        lastTapXRef.current = x
+        togglePlay()
+      }}
     >
       <video
         ref={videoRef}
@@ -518,6 +825,58 @@ export function VideoPlayer({
       {isLoading && !error && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="w-14 h-14 border-4 border-white/20 border-t-white rounded-full animate-spin" />
+        </div>
+      )}
+
+      {/* Double-tap feedback */}
+      {tapFeedback && (
+        <div
+          className={`absolute top-1/3 ${tapFeedback.side === 'left' ? 'left-8' : 'right-8'} pointer-events-none flex items-center gap-2 bg-black/50 rounded-full px-4 py-3 animate-pulse`}
+        >
+          {tapFeedback.side === 'left' ? (
+            <svg className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" /></svg>
+          ) : (
+            <svg className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" /></svg>
+          )}
+          <span className="text-white text-sm font-bold">10s</span>
+        </div>
+      )}
+
+      {/* Next Episode countdown */}
+      {showNextUp && (
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-black/70"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-premiumflix-surface border border-white/20 rounded-xl p-6 max-w-sm w-full mx-4 text-center">
+            {nextEpisodeLabel && (
+              <p className="text-white/60 text-sm mb-1">Up next</p>
+            )}
+            <p className="text-white font-bold text-lg mb-4">
+              {nextEpisodeLabel ?? 'Next episode'}
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => {
+                  if (nextUpTimerRef.current) clearInterval(nextUpTimerRef.current)
+                  setShowNextUp(false)
+                  onNextEpisode?.()
+                }}
+                className="bg-white text-black font-bold px-6 py-2.5 rounded hover:bg-white/80 transition-colors"
+              >
+                Play ({nextUpCountdown}s)
+              </button>
+              <button
+                onClick={() => {
+                  if (nextUpTimerRef.current) clearInterval(nextUpTimerRef.current)
+                  setShowNextUp(false)
+                }}
+                className="bg-white/10 text-white font-bold px-6 py-2.5 rounded hover:bg-white/20 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -543,10 +902,10 @@ export function VideoPlayer({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top bar */}
-        <div className="bg-gradient-to-b from-black/80 to-transparent pt-4 pb-8 px-4 sm:px-8 flex items-center gap-4">
+        <div className="bg-gradient-to-b from-black/80 to-transparent pt-2 sm:pt-4 pb-6 sm:pb-8 px-3 sm:px-8 flex items-center gap-3 sm:gap-4 safe-top">
           <button
             onClick={onBack}
-            className="text-white hover:text-white/70 transition-colors p-1"
+            className="text-white hover:text-white/70 transition-colors p-2 -ml-1 sm:p-1"
           >
             <BackArrow className="w-6 h-6" />
           </button>
@@ -556,30 +915,77 @@ export function VideoPlayer({
           </div>
         </div>
 
-        {/* Center play button */}
-        <div className="flex items-center justify-center gap-8 pointer-events-auto">
-          <button onClick={() => skip(-10)} className="text-white hover:scale-110 transition-transform">
-            <Rewind className="w-10 h-10" />
-          </button>
-          <button onClick={togglePlay} className="text-white hover:scale-110 transition-transform">
-            {isPlaying ? <PauseIcon className="w-16 h-16" /> : <PlayIcon className="w-16 h-16" />}
-          </button>
-          <button onClick={() => skip(10)} className="text-white hover:scale-110 transition-transform">
-            <FastForward className="w-10 h-10" />
-          </button>
-        </div>
+        {/* Center play button — hidden while buffering */}
+        {!isLoading && (
+          <div className="flex items-center justify-center gap-6 sm:gap-8 pointer-events-auto">
+            <button onClick={() => skip(-10)} className="text-white hover:scale-110 transition-transform p-2">
+              <Rewind className="w-8 h-8 sm:w-10 sm:h-10" />
+            </button>
+            <button onClick={togglePlay} className="text-white hover:scale-110 transition-transform p-2">
+              {isPlaying ? <PauseIcon className="w-12 h-12 sm:w-16 sm:h-16" /> : <PlayIcon className="w-12 h-12 sm:w-16 sm:h-16" />}
+            </button>
+            <button onClick={() => skip(10)} className="text-white hover:scale-110 transition-transform p-2">
+              <FastForward className="w-8 h-8 sm:w-10 sm:h-10" />
+            </button>
+          </div>
+        )}
 
         {/* Bottom controls */}
         <div
-          className="bg-gradient-to-t from-black/90 to-transparent pt-8 pb-4 px-4 sm:px-8"
+          className="bg-gradient-to-t from-black/90 to-transparent pt-6 sm:pt-8 pb-2 sm:pb-4 px-3 sm:px-8 safe-bottom"
           onMouseMove={(e) => e.stopPropagation()}
         >
           {/* Seek bar */}
           <div
             ref={seekBarRef}
-            className="relative h-1 bg-white/20 rounded-full cursor-pointer mb-3 group/seek hover:h-3 transition-all"
+            className="relative bg-white/20 rounded-full cursor-pointer mb-2 sm:mb-3 group/seek h-2 sm:h-1 hover:h-3 sm:hover:h-3 transition-all touch-none"
             onClick={handleSeekBarClick}
+            onTouchMove={handleSeekBarTouch}
+            onTouchEnd={(e) => {
+              if (e.changedTouches.length > 0) {
+                seekToPosition(e.changedTouches[0].clientX)
+              }
+            }}
+            onMouseMove={handleSeekBarHover}
+            onMouseLeave={() => setHoverTime(null)}
           >
+            {/* Hover thumbnail preview */}
+            {hoverTime !== null && (
+              <div
+                className="absolute bottom-full mb-3 pointer-events-none z-10"
+                style={{ left: `${hoverX}px`, transform: 'translateX(-50%)' }}
+              >
+                <div className="flex flex-col items-center">
+                  {hoverImgUrl && hoverCrop && thumbnails.length > 0 ? (
+                    <div
+                      className="overflow-hidden rounded-md border border-white/20 shadow-xl bg-black"
+                      style={{ width: 160, height: 90 }}
+                    >
+                      <img
+                        src={hoverImgUrl}
+                        alt=""
+                        className="absolute"
+                        style={{
+                          width: hoverCrop.w,
+                          height: hoverCrop.h,
+                          objectFit: 'none',
+                          objectPosition: `-${hoverCrop.x}px -${hoverCrop.y}px`,
+                          position: 'relative',
+                          maxWidth: 'none',
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-[160px] h-[90px] bg-black/80 border border-white/20 rounded-md flex items-center justify-center">
+                      <span className="text-white/40 text-xs">Preview</span>
+                    </div>
+                  )}
+                  <span className="text-white text-xs mt-1 bg-black/80 px-2 py-0.5 rounded font-mono">
+                    {formatTime(hoverTime)}
+                  </span>
+                </div>
+              </div>
+            )}
             <div
               className="absolute top-0 left-0 h-full bg-white/30 rounded-full"
               style={{ width: `${bufferedPct}%` }}
@@ -589,27 +995,27 @@ export function VideoPlayer({
               style={{ width: `${progressPct}%` }}
             />
             <div
-              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-premiumflix-red rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity shadow-lg"
+              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 sm:w-3 sm:h-3 bg-premiumflix-red rounded-full opacity-100 sm:opacity-0 sm:group-hover/seek:opacity-100 transition-opacity shadow-lg"
               style={{ left: `${progressPct}%`, transform: 'translate(-50%, -50%)' }}
             />
           </div>
 
           {/* Bottom row */}
-          <div className="flex items-center gap-3">
-            <button onClick={togglePlay} className="text-white hover:text-white/70 transition-colors">
-              {isPlaying ? <PauseIcon className="w-6 h-6" /> : <PlayIcon className="w-6 h-6" />}
+          <div className="flex items-center gap-1.5 sm:gap-3 overflow-x-auto scrollbar-hide">
+            <button onClick={togglePlay} className="text-white hover:text-white/70 transition-colors flex-shrink-0 p-1">
+              {isPlaying ? <PauseIcon className="w-5 h-5 sm:w-6 sm:h-6" /> : <PlayIcon className="w-5 h-5 sm:w-6 sm:h-6" />}
             </button>
 
-            <button onClick={() => skip(-10)} className="text-white hover:text-white/70 transition-colors hidden sm:block">
+            <button onClick={() => skip(-10)} className="text-white hover:text-white/70 transition-colors hidden sm:block flex-shrink-0">
               <Rewind className="w-5 h-5" />
             </button>
-            <button onClick={() => skip(10)} className="text-white hover:text-white/70 transition-colors hidden sm:block">
+            <button onClick={() => skip(10)} className="text-white hover:text-white/70 transition-colors hidden sm:block flex-shrink-0">
               <FastForward className="w-5 h-5" />
             </button>
 
             {/* Volume */}
-            <div className="flex items-center gap-1 group/vol">
-              <button onClick={toggleMute} className="text-white hover:text-white/70 transition-colors">
+            <div className="flex items-center gap-1 group/vol flex-shrink-0">
+              <button onClick={toggleMute} className="text-white hover:text-white/70 transition-colors p-1">
                 {isMuted || volume === 0 ? <MuteIcon className="w-5 h-5" /> : <VolumeIcon className="w-5 h-5" />}
               </button>
               <input
@@ -619,22 +1025,22 @@ export function VideoPlayer({
                 step={0.05}
                 value={isMuted ? 0 : volume}
                 onChange={handleVolume}
-                className="w-0 group-hover/vol:w-20 transition-all overflow-hidden accent-white cursor-pointer h-1"
+                className={`${isMobile ? 'w-16' : 'w-0 group-hover/vol:w-20'} transition-all overflow-hidden accent-white cursor-pointer h-1`}
               />
             </div>
 
             {/* Time */}
-            <span className="text-white text-xs sm:text-sm tabular-nums ml-1">
+            <span className="text-white text-[11px] sm:text-sm tabular-nums ml-0.5 sm:ml-1 flex-shrink-0">
               {formatTime(currentTime)} / {formatTime(duration)}
             </span>
 
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-1 sm:gap-2 flex-shrink-0">
               {/* Subtitles */}
               {(hlsSubTracks.length > 0 || (subtitles && subtitles.length > 0) || (openSubtitles && openSubtitles.length > 0)) && (
                 <div className="relative">
                   <button
-                    onClick={(e) => { e.stopPropagation(); setShowSubMenu((v) => !v); setShowLangMenu(false) }}
-                    className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors ${
+                    onClick={(e) => { e.stopPropagation(); setShowSubMenu((v) => !v); setShowLangMenu(false); setShowQualityMenu(false); setShowSpeedMenu(false) }}
+                    className={`flex items-center gap-1 text-xs font-medium px-1.5 sm:px-2 py-1 rounded border transition-colors ${
                       activeSubtitle || activeHlsSub >= 0
                         ? 'text-white border-white/60 bg-white/10'
                         : 'text-white/60 hover:text-white border-white/30 hover:border-white/60'
@@ -645,11 +1051,12 @@ export function VideoPlayer({
                   </button>
                   {showSubMenu && (
                     <div
-                      className="absolute bottom-full mb-2 right-0 bg-black/90 border border-white/20 rounded-lg overflow-hidden min-w-[130px] shadow-xl"
+                      className="absolute bottom-full mb-2 right-0 bg-black/95 backdrop-blur-sm border border-white/20 rounded-lg overflow-y-auto overflow-x-hidden min-w-[130px] max-h-[50vh] shadow-xl"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
                         onClick={() => {
+                          userSubOffRef.current = true
                           setActiveSubtitle(null)
                           setActiveHlsSub(-1)
                           if (hlsRef.current) hlsRef.current.subtitleTrack = -1
@@ -673,6 +1080,7 @@ export function VideoPlayer({
                         <button
                           key={`hls-${track.id}`}
                           onClick={() => {
+                            userSubOffRef.current = false
                             setActiveSubtitle(null)
                             if (hlsRef.current) hlsRef.current.subtitleTrack = track.id
                             setActiveHlsSub(track.id)
@@ -689,6 +1097,7 @@ export function VideoPlayer({
                         <button
                           key={track.id}
                           onClick={() => {
+                            userSubOffRef.current = false
                             if (hlsRef.current) hlsRef.current.subtitleTrack = -1
                             setActiveHlsSub(-1)
                             setActiveSubtitle(track.id)
@@ -714,6 +1123,7 @@ export function VideoPlayer({
                             <button
                               key={sub.dl_link}
                               onClick={() => {
+                                userSubOffRef.current = false
                                 if (hlsRef.current) hlsRef.current.subtitleTrack = -1
                                 setActiveHlsSub(-1)
                                 // Load SRT from dl_link, convert to VTT, apply
@@ -727,8 +1137,11 @@ export function VideoPlayer({
                                   URL.revokeObjectURL(subtitleBlobRef.current)
                                   subtitleBlobRef.current = null
                                 }
-                                fetch(sub.dl_link)
-                                  .then(r => r.text())
+                                fetch(proxyOsUrl(sub.dl_link))
+                                  .then(r => {
+                                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                                    return r.text()
+                                  })
                                   .then(text => {
                                     if (!video) return
                                     const vtt = sub.name.toLowerCase().endsWith('.vtt') ? text : srtToVtt(text)
@@ -752,7 +1165,10 @@ export function VideoPlayer({
                                     setActiveSubtitle(`os:${sub.dl_link}`)
                                     setLoadingOpenSub(null)
                                   })
-                                  .catch(() => setLoadingOpenSub(null))
+                                  .catch((err) => {
+                                    console.warn('[Player] Failed to load OpenSubtitle:', err)
+                                    setLoadingOpenSub(null)
+                                  })
                                 setShowSubMenu(false)
                               }}
                               className={`w-full text-left px-4 py-2 text-sm transition-colors ${
@@ -778,7 +1194,7 @@ export function VideoPlayer({
 
               {/* Audio language */}
               {audioTracks.length >= 1 && (
-                <div className="relative">
+                <div className="relative hidden sm:block">
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowLangMenu((v) => !v) }}
                     className="text-white hover:text-white/70 transition-colors flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border border-white/30 hover:border-white/60"
@@ -791,7 +1207,7 @@ export function VideoPlayer({
                   </button>
                   {showLangMenu && (
                     <div
-                      className="absolute bottom-full mb-2 right-0 bg-black/90 border border-white/20 rounded-lg overflow-hidden min-w-[120px] shadow-xl"
+                      className="absolute bottom-full mb-2 right-0 bg-black/95 backdrop-blur-sm border border-white/20 rounded-lg overflow-y-auto overflow-x-hidden min-w-[120px] max-h-[50vh] shadow-xl"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {audioTracks.map((track) => (
@@ -818,16 +1234,186 @@ export function VideoPlayer({
                 </div>
               )}
 
+              {/* Playback speed */}
+              <div className="relative hidden sm:block">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowSpeedMenu((v) => !v); setShowQualityMenu(false); setShowLangMenu(false); setShowSubMenu(false) }}
+                  className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors ${
+                    playbackRate !== 1
+                      ? 'text-white border-white/60 bg-white/10'
+                      : 'text-white/60 hover:text-white border-white/30 hover:border-white/60'
+                  }`}
+                  title="Playback speed"
+                >
+                  <SpeedIcon className="w-4 h-4" />
+                  <span>{playbackRate === 1 ? '1x' : `${playbackRate}x`}</span>
+                </button>
+                {showSpeedMenu && (
+                  <div
+                    className="absolute bottom-full mb-2 right-0 bg-black/95 backdrop-blur-sm border border-white/20 rounded-lg overflow-y-auto overflow-x-hidden min-w-[100px] max-h-[50vh] shadow-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => (
+                      <button
+                        key={rate}
+                        onClick={() => changeSpeed(rate)}
+                        className={`w-full text-left px-4 py-2 text-sm transition-colors ${
+                          rate === playbackRate
+                            ? 'bg-red-600 text-white font-bold'
+                            : 'text-white/80 hover:bg-white/10'
+                        }`
+                        }
+                      >
+                        {rate}x
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Quality / Resolution */}
+              {levels.length > 1 && (
+                <div className="relative hidden sm:block">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowQualityMenu((v) => !v); setShowSpeedMenu(false); setShowLangMenu(false); setShowSubMenu(false) }}
+                    className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors ${
+                      !autoLevel
+                        ? 'text-white border-white/60 bg-white/10'
+                        : 'text-white/60 hover:text-white border-white/30 hover:border-white/60'
+                    }`}
+                    title="Quality"
+                  >
+                    <SettingsIcon className="w-4 h-4" />
+                    <span>
+                      {autoLevel
+                        ? (currentLevel >= 0 ? `Auto · ${levelLabel(levels[currentLevel]?.height)}` : 'Auto')
+                        : (currentLevel >= 0 ? levelLabel(levels[currentLevel]?.height) : 'Auto')
+                      }
+                    </span>
+                  </button>
+                  {showQualityMenu && (
+                    <div
+                      className="absolute bottom-full mb-2 right-0 bg-black/95 backdrop-blur-sm border border-white/20 rounded-lg overflow-y-auto overflow-x-hidden min-w-[180px] max-h-[50vh] shadow-xl"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => changeQuality(-1)}
+                        className={`w-full text-left px-4 py-2 text-sm transition-colors ${
+                          autoLevel
+                            ? 'bg-red-600 text-white font-bold'
+                            : 'text-white/80 hover:bg-white/10'
+                        }`
+                        }
+                      >
+                        Auto
+                        {autoLevel && currentLevel >= 0 && (
+                          <span className="text-white/60 ml-2">({levelLabel(levels[currentLevel]?.height)})</span>
+                        )}
+                      </button>
+                      {levels.map((level, i) => (
+                        <button
+                          key={i}
+                          onClick={() => changeQuality(i)}
+                          className={`w-full text-left px-4 py-2 text-sm transition-colors ${
+                            !autoLevel && i === currentLevel
+                              ? 'bg-red-600 text-white font-bold'
+                              : 'text-white/80 hover:bg-white/10'
+                          }`
+                          }
+                        >
+                          <span className="font-medium">{levelLabel(level.height)}</span>
+                          <span className="text-white/50 ml-2">{level.width}×{level.height}</span>
+                          {level.bitrate > 0 && (
+                            <span className="text-white/40 ml-2">{(level.bitrate / 1_000_000).toFixed(1)} Mbps</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AirPlay */}
+              {airplayAvailable && (
+                <button onClick={triggerAirPlay} className="text-white/50 hover:text-white transition-colors hidden sm:block" title="AirPlay">
+                  <AirPlayIcon className="w-5 h-5" />
+                </button>
+              )}
+
+              {/* PiP */}
+              {pipSupported && (
+                <button onClick={togglePiP} className="text-white hover:text-white/70 transition-colors hidden sm:block" title="Picture in picture">
+                  <PiPIcon className="w-5 h-5" />
+                </button>
+              )}
+
+              {/* Chromecast */}
+              <button onClick={startChromecast} className={`transition-colors hidden sm:block ${isCasting ? 'text-blue-400 hover:text-blue-300' : 'text-white/50 hover:text-white'}`} title="Cast">
+                <CastIcon className="w-5 h-5" />
+              </button>
+
               {/* Fullscreen */}
-              <button onClick={toggleFullscreen} className="text-white hover:text-white/70 transition-colors">
+              <button onClick={toggleFullscreen} className="text-white hover:text-white/70 transition-colors p-1">
                 {isFullscreen ? <ExitFullscreenIcon className="w-5 h-5" /> : <FullscreenIcon className="w-5 h-5" />}
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Keyboard shortcut help */}
+      {showHelp && (
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-black/80 z-50"
+          onClick={() => setShowHelp(false)}
+        >
+          <div
+            className="bg-premiumflix-surface border border-white/20 rounded-xl p-6 max-w-sm w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-white font-bold text-lg">Keyboard Shortcuts</h3>
+              <button onClick={() => setShowHelp(false)} className="text-white/50 hover:text-white text-lg">✕</button>
+            </div>
+            <div className="space-y-2 text-sm">
+              {[
+                ['Space / K', 'Play / Pause'],
+                ['F', 'Fullscreen'],
+                ['M', 'Mute'],
+                ['←', 'Seek -10s'],
+                ['→', 'Seek +10s'],
+                ['↑', 'Volume up'],
+                ['↓', 'Volume down'],
+                ['?', 'This help'],
+              ].map(([key, desc]) => (
+                <div key={key} className="flex justify-between">
+                  <span className="text-white/70">{desc}</span>
+                  <kbd className="bg-white/10 text-white px-2 py-0.5 rounded text-xs font-mono">{key}</kbd>
+                </div>
+              ))}
+            </div>
+            <p className="text-white/30 text-xs mt-4 text-center">Double-tap left/right side to seek on mobile</p>
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+// ─── Proxy OpenSubtitles URL ────────────────────────────────────────────────
+
+function proxyOsUrl(dlLink: string): string {
+  // In dev, route through Vite proxy to avoid CORS
+  if (import.meta.env.DEV) {
+    try {
+      const url = new URL(dlLink)
+      return `/ossub${url.pathname}${url.search}`
+    } catch {
+      return dlLink
+    }
+  }
+  // In production, try direct (may or may not work depending on CORS)
+  return dlLink
 }
 
 // ─── SRT → WebVTT ─────────────────────────────────────────────────────────
@@ -844,6 +1430,67 @@ function srtToVtt(srt: string): string {
       .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
   })
   return 'WEBVTT\n\n' + converted.join('\n\n')
+}
+
+// ─── Storyboard VTT parser ─────────────────────────────────────────────────
+
+interface ThumbCue {
+  time: number
+  url: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+function parseVttTime(s: string): number {
+  const parts = s.split(':')
+  if (parts.length === 3) {
+    const [h, m, rest] = parts
+    const [sec, ms] = rest.split('.')
+    return Number(h) * 3600 + Number(m) * 60 + Number(sec) + Number(ms ?? '0') / 1000
+  }
+  if (parts.length === 2) {
+    const [m, rest] = parts
+    const [sec, ms] = rest.split('.')
+    return Number(m) * 60 + Number(sec) + Number(ms ?? '0') / 1000
+  }
+  return 0
+}
+
+function parseStoryboardVtt(vtt: string, manifestUrl: string): ThumbCue[] {
+  const cues: ThumbCue[] = []
+  const blocks = vtt.replace(/\r\n/g, '\n').split('\n\n')
+  for (const block of blocks) {
+    const lines = block.split('\n')
+    const timeLine = lines.find((l) => l.includes('-->'))
+    if (!timeLine) continue
+    const [startStr] = timeLine.split('-->')
+    const start = parseVttTime(startStr.trim())
+    if (!isFinite(start)) continue
+
+    // Last line is the image reference
+    const imgLine = lines[lines.length - 1].trim()
+    if (!imgLine) continue
+
+    // The image URL may be relative to the manifest URL
+    const [urlPart, hash] = imgLine.split('#')
+    let fullUrl: string
+    try {
+      fullUrl = new URL(urlPart, manifestUrl).href
+    } catch {
+      fullUrl = urlPart
+    }
+
+    let x = 0, y = 0, w = 160, h = 90
+    if (hash && hash.startsWith('xywh=')) {
+      const coords = hash.substring(5).split(',').map(Number)
+      if (coords.length === 4) [x, y, w, h] = coords
+    }
+
+    cues.push({ time: start, url: fullUrl, x, y, w, h })
+  }
+  return cues.sort((a, b) => a.time - b.time)
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────
@@ -890,4 +1537,40 @@ function AudioIcon({ className }: { className?: string }) {
 
 function CCIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z" /></svg>
+}
+
+function SpeedIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M20.38 8.57l-1.23 1.85a8 8 0 01-.22 7.58H5.07A8 8 0 0115.58 6.85l1.85-1.23A10 10 0 003.35 19a2 2 0 001.72 1h13.85a2 2 0 001.74-1 10 10 0 00-.27-10.44zm-9.79 6.84a2 2 0 002.83 0l5.66-8.49-8.49 5.66a2 2 0 000 2.83z" /></svg>
+}
+
+function SettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.611 3.611 0 0112 15.6z" />
+    </svg>
+  )
+}
+
+function PiPIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z" />
+    </svg>
+  )
+}
+
+function CastIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z" />
+    </svg>
+  )
+}
+
+function AirPlayIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 22h12l-6-6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" />
+    </svg>
+  )
 }

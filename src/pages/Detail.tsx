@@ -1,11 +1,9 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useLibrary } from '../contexts/LibraryContext'
-import { useCollection } from '../hooks/useCollection'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import { itemDetails } from '../services/premiumize'
 import { getCredits } from '../services/metadata'
-import { db } from '../db'
 import {
   movieDisplayTitle,
   showDisplayTitle,
@@ -22,8 +20,7 @@ import { useI18n } from '../contexts/I18nContext'
 
 export function MovieDetail() {
   const { id } = useParams<{ id: string }>()
-  const { movies, removeMovieFromLibrary } = useLibrary()
-  const { isFavorite, isOnWatchlist, toggleFavorite, toggleWatchlist } = useCollection()
+  const { movies, removeMovieFromLibrary, isLoading, updateMovieInLibrary, isFavorite, isOnWatchlist, toggleFavorite, toggleWatchlist } = useLibrary()
   const { getProgressFraction, isFinished } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -38,12 +35,19 @@ export function MovieDetail() {
     if (movie && !movie.credits && movie.tmdbDetail) {
       getCredits(movie.tmdbDetail, 'movie').then((c) => {
         setLocalCredits(c)
-        db.movies.update(movie.id, { credits: c })
+        updateMovieInLibrary({ ...movie, credits: c })
       }).catch(console.error)
     }
   }, [movie])
 
   if (!movie) {
+    if (isLoading) {
+      return (
+        <div className="min-h-screen bg-premiumflix-dark flex items-center justify-center">
+          <div className="w-10 h-10 border-4 border-white/20 border-t-white rounded-full animate-spin" />
+        </div>
+      )
+    }
     return (
       <div className="min-h-screen bg-premiumflix-dark flex items-center justify-center">
         <p className="text-premiumflix-muted">{t.detail.movieNotFound}</p>
@@ -55,9 +59,7 @@ export function MovieDetail() {
   const backdrop = backdropUrl(movie.tmdbDetail?.backdrop_path)
   const poster = posterUrl(movie.tmdbDetail?.poster_path)
   const year = movie.tmdbDetail?.release_date?.slice(0, 4) ?? movie.year
-  const runtime = formatRuntime(movie.tmdbDetail?.runtime) ?? movie.files[0]
-    ? undefined
-    : undefined
+  const runtime = formatRuntime(movie.tmdbDetail?.runtime)
   const rating = movie.tmdbDetail?.vote_average
   const genres = movie.tmdbDetail?.genres
   const overview = movie.tmdbDetail?.overview
@@ -138,8 +140,7 @@ export function MovieDetail() {
 
 export function ShowDetail() {
   const { id } = useParams<{ id: string }>()
-  const { tvShows, removeShowFromLibrary } = useLibrary()
-  const { isFavorite, isOnWatchlist, toggleFavorite, toggleWatchlist } = useCollection()
+  const { tvShows, removeShowFromLibrary, isLoading, updateShowInLibrary, isFavorite, isOnWatchlist, toggleFavorite, toggleWatchlist } = useLibrary()
   const { getProgressFraction } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -155,12 +156,19 @@ export function ShowDetail() {
     if (show && !show.credits && show.tmdbDetail) {
       getCredits(show.tmdbDetail, 'tv').then((c) => {
         setLocalCredits(c)
-        db.tvShows.update(show.id, { credits: c })
+        updateShowInLibrary({ ...show, credits: c })
       }).catch(console.error)
     }
   }, [show])
 
   if (!show) {
+    if (isLoading) {
+      return (
+        <div className="min-h-screen bg-premiumflix-dark flex items-center justify-center">
+          <div className="w-10 h-10 border-4 border-white/20 border-t-white rounded-full animate-spin" />
+        </div>
+      )
+    }
     return (
       <div className="min-h-screen bg-premiumflix-dark flex items-center justify-center">
         <p className="text-premiumflix-muted">{t.detail.showNotFound}</p>
@@ -548,8 +556,13 @@ function DetailShell({
             <h3 className="text-white font-bold text-lg mb-4">{t.detail.cast}</h3>
             <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
               {cast.map((actor) => (
-                <div key={actor.id} className="flex-shrink-0 w-24 text-center">
-                  <div className="w-20 h-20 rounded-full overflow-hidden bg-premiumflix-surface mx-auto mb-2">
+                <a
+                  key={actor.id}
+                  href={`/person/${actor.id}`}
+                  onClick={(e) => { e.preventDefault(); navigate(`/person/${actor.id}`) }}
+                  className="flex-shrink-0 w-24 text-center cursor-pointer group"
+                >
+                  <div className="w-20 h-20 rounded-full overflow-hidden bg-premiumflix-surface mx-auto mb-2 ring-2 ring-transparent group-hover:ring-premiumflix-red/50 transition-all">
                     {actor.profile_path ? (
                       <img
                         src={profileUrl(actor.profile_path)}
@@ -563,11 +576,11 @@ function DetailShell({
                       </div>
                     )}
                   </div>
-                  <p className="text-white text-xs font-medium truncate">{actor.name}</p>
+                  <p className="text-white text-xs font-medium truncate group-hover:text-premiumflix-red transition-colors">{actor.name}</p>
                   {actor.character && (
                     <p className="text-premiumflix-muted text-xs truncate">{actor.character}</p>
                   )}
-                </div>
+                </a>
               ))}
             </div>
           </section>

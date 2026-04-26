@@ -17,6 +17,7 @@ export function Settings() {
   const [language, setLanguage] = useState(localStorage.getItem('tmdb_language') ?? 'en-US')
   const [savedLang, setSavedLang] = useState(localStorage.getItem('tmdb_language') ?? 'en-US')
   const [saved, setSaved] = useState(false)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
 
   const [accountData, setAccountData] = useState<{ premiumUntil?: number; spaceUsed?: number } | null>(null)
   const [accountError, setAccountError] = useState<string | null>(null)
@@ -26,7 +27,7 @@ export function Settings() {
     try {
       return JSON.parse(localStorage.getItem('scan_folders') ?? '[]')
     } catch {
-      return []
+      /* corrupt value */ return []
     }
   })
   const [loadingFolders, setLoadingFolders] = useState(false)
@@ -382,14 +383,18 @@ export function Settings() {
               </button>
               <button
                 onClick={() => {
-                  if (confirm('This will clear the library and rescan. Continue?')) {
+                  if (showClearConfirm) {
                     clearAndRescan(selectedFolders.length ? selectedFolders : undefined)
+                    setShowClearConfirm(false)
+                  } else {
+                    setShowClearConfirm(true)
+                    setTimeout(() => setShowClearConfirm(false), 4000)
                   }
                 }}
                 disabled={isLoading}
-                className="bg-white/10 text-white text-sm font-medium px-4 py-2 rounded hover:bg-white/20 transition-colors disabled:opacity-50"
+                className={`text-sm font-medium px-4 py-2 rounded transition-colors disabled:opacity-50 ${showClearConfirm ? 'bg-red-700 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'}`}
               >
-                {t.settings.clearRescan}
+                {showClearConfirm ? 'Tap again to confirm' : t.settings.clearRescan}
               </button>
               <button
                 onClick={() => navigate('/')}

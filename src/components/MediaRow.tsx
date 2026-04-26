@@ -107,7 +107,7 @@ function RowShell({
 }
 
 export function MovieRow({ title, movies, showViewAll }: MovieRowProps) {
-  const { getProgressFraction } = useWatchProgress()
+  const { getProgressFraction, isFinished } = useWatchProgress()
 
   return (
     <RowShell title={title} showViewAll={showViewAll}>
@@ -119,6 +119,7 @@ export function MovieRow({ title, movies, showViewAll }: MovieRowProps) {
             key={movie.id}
             movie={movie}
             progressFraction={fraction > 0 ? fraction : undefined}
+            isWatched={movie.files.some(f => isFinished(f.id))}
           />
         )
       })}

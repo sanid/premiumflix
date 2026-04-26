@@ -1,5 +1,6 @@
 import { Movie, TVShow } from '../types'
 import { listFolder, deleteItem, getUploadInfo, getDirectLink } from './premiumize'
+import { debugLog } from '../lib/debug'
 
 const LIBRARY_FILENAME = 'premiumflix_library.json'
 
@@ -49,7 +50,7 @@ export async function syncLibraryToCloud(movies: Movie[], tvShows: TVShow[]): Pr
     const data = await res.json()
     if (data.status === 'error') throw new Error(data.message || 'Upload error')
     
-    console.log('Library synced to cloud successfully')
+    debugLog('Library synced to cloud successfully')
   } catch (e) {
     console.error('Failed to sync library to cloud', e)
     throw e

@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
 import { useCollection } from '../hooks/useCollection'
+import { useWatchProgress } from '../hooks/useWatchProgress'
 import { MovieCard } from '../components/MediaCard'
 import { movieDisplayTitle, movieMainFile } from '../types'
 import type { Movie } from '../types'
@@ -13,6 +14,7 @@ type FilterKey = 'all' | 'favorites' | 'watchlist'
 export function Movies() {
   const { movies } = useLibrary()
   const { favoriteIds, watchlistIds } = useCollection()
+  const { isFinished } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
 
@@ -156,7 +158,7 @@ export function Movies() {
           }}
         >
           {filtered.map((movie) => (
-            <MovieCard key={movie.id} movie={movie} onPlay={() => playMovie(movie)} />
+            <MovieCard key={movie.id} movie={movie} onPlay={() => playMovie(movie)} isWatched={movie.files.some(f => isFinished(f.id))} />
           ))}
         </div>
       )}

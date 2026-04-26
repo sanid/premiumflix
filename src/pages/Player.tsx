@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
 import { useWatchProgress } from '../hooks/useWatchProgress'
@@ -6,6 +6,7 @@ import { VideoPlayer } from '../components/VideoPlayer'
 import { itemDetails, fetchSubtitles } from '../services/premiumize'
 import type { PMSubtitle } from '../services/premiumize'
 import { getProgress } from '../db'
+import { debugLog } from '../lib/debug'
 import { movieDisplayTitle, showDisplayTitle, movieMainFile } from '../types'
 import type { MediaFile } from '../types'
 
@@ -31,6 +32,13 @@ export function Player() {
   const { movies, tvShows } = useLibrary()
   const { saveProgress } = useWatchProgress()
   const navigate = useNavigate()
+
+  // Lock body scroll and set up fullscreen-friendly viewport
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
 
   const [playUrl, setPlayUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -96,7 +104,7 @@ export function Player() {
     // Fetch OpenSubtitles matches in background (non-blocking)
     fetchSubtitles(pmId).then((subs) => {
       if (!cancelled && subs.length > 0) {
-        console.log('[Player:page] OpenSubtitles found:', subs.length, 'subs')
+        debugLog('[Player:page] OpenSubtitles found:', subs.length, 'subs')
         setOpenSubs(subs)
       }
     }).catch(() => {})
@@ -113,7 +121,7 @@ export function Player() {
       .then((d) => {
         if (cancelled) return
 
-        console.log('[Player:page] API response:', {
+        debugLog('[Player:page] API response:', {
           stream_link: d.stream_link ? '✓ ' + d.stream_link.substring(0, 60) + '...' : '✗ null',
           link: d.link ? '✓ ' + d.link.substring(0, 60) + '...' : '✗ null',
           transcode_status: d.transcode_status,
@@ -129,7 +137,7 @@ export function Player() {
         // Construct live transcode URL from direct link (instant playback)
         if (d.link) {
           const hlsUrl = liveTranscodeUrl(d.link)
-          console.log('[Player:page] Constructed live transcode URL:', hlsUrl.substring(0, 100) + '...')
+          debugLog('[Player:page] Constructed live transcode URL:', hlsUrl.substring(0, 100) + '...')
           setPlayUrl(hlsUrl)
           setLoading(false)
           return
@@ -153,6 +161,51 @@ export function Player() {
 
   function handleBack() {
     navigate(-1)
+  }
+
+  // ─── Next episode logic ───────────────────────────────────────────────────
+  const nextEpisodeInfo = useMemo(() => {
+    if (mode !== 'show' || !fileId) return null
+    const show = tvShows.find((s) => s.id === mediaId)
+    if (!show) return null
+
+    const sortedSeasons = [...show.seasons].sort((a, b) => a.number - b.number)
+    for (let si = 0; si < sortedSeasons.length; si++) {
+      const season = sortedSeasons[si]
+      const sortedEps = [...season.episodes].sort((a, b) => a.number - b.number)
+      for (let ei = 0; ei < sortedEps.length; ei++) {
+        if (sortedEps[ei].file.id === fileId) {
+          // Found current episode — look for next
+          if (ei + 1 < sortedEps.length) {
+            const next = sortedEps[ei + 1]
+            const label = next.tmdbEpisode?.name
+              ? `S${String(season.number).padStart(2, '0')}E${String(next.number).padStart(2, '0')} — ${next.tmdbEpisode.name}`
+              : `S${String(season.number).padStart(2, '0')}E${String(next.number).padStart(2, '0')}`
+            return { fileId: next.file.id, label }
+          }
+          // Try next season
+          if (si + 1 < sortedSeasons.length) {
+            const nextSeason = sortedSeasons[si + 1]
+            const nextSeasonEps = [...nextSeason.episodes].sort((a, b) => a.number - b.number)
+            if (nextSeasonEps.length > 0) {
+              const next = nextSeasonEps[0]
+              const label = next.tmdbEpisode?.name
+                ? `S${String(nextSeason.number).padStart(2, '0')}E${String(next.number).padStart(2, '0')} — ${next.tmdbEpisode.name}`
+                : `S${String(nextSeason.number).padStart(2, '0')}E${String(next.number).padStart(2, '0')}`
+              return { fileId: next.file.id, label }
+            }
+          }
+          return null // Last episode
+        }
+      }
+    }
+    return null
+  }, [mode, mediaId, fileId, tvShows])
+
+  function handleNextEpisode() {
+    if (nextEpisodeInfo) {
+      navigate(`/play/show/${mediaId}/${nextEpisodeInfo.fileId}`, { replace: true })
+    }
   }
 
   if (loading) {
@@ -190,6 +243,8 @@ export function Player() {
         initialPosition={initialPosition}
         onProgress={handleProgress}
         onBack={handleBack}
+        onNextEpisode={nextEpisodeInfo ? handleNextEpisode : undefined}
+        nextEpisodeLabel={nextEpisodeInfo?.label}
       />
     </div>
   )
