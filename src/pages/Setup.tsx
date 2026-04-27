@@ -122,12 +122,14 @@ export function Setup() {
 
   async function handleScan() {
     localStorage.setItem('scan_folders', JSON.stringify(selectedFolders))
+    setStep('done')
     await scan(selectedFolders.length > 0 ? selectedFolders : undefined)
     navigate('/')
   }
 
   function handleSkip() {
     localStorage.setItem('scan_folders', JSON.stringify(selectedFolders))
+    setStep('done')
     scan().then(() => navigate('/'))
   }
 
