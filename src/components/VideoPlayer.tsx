@@ -537,18 +537,27 @@ export function VideoPlayer({
 
   const hideDelay = isMobile ? 4000 : 3000
 
+  // Ref to track if any dropdown menu is open (avoids stale closures in timers)
+  const menuOpenRef = useRef(false)
+
+  useEffect(() => {
+    menuOpenRef.current = showSubMenu || showLangMenu || showSpeedMenu || showQualityMenu
+  }, [showSubMenu, showLangMenu, showSpeedMenu, showQualityMenu])
+
   const showControlsTemporarily = useCallback(() => {
     setShowControls(true)
     if (hideTimer.current) clearTimeout(hideTimer.current)
     hideTimer.current = setTimeout(() => {
-      if (isPlaying) setShowControls(false)
+      if (isPlaying && !menuOpenRef.current) setShowControls(false)
     }, hideDelay)
   }, [isPlaying, hideDelay])
 
   useEffect(() => {
     if (!isPlaying) setShowControls(true)
     else {
-      hideTimer.current = setTimeout(() => setShowControls(false), hideDelay)
+      hideTimer.current = setTimeout(() => {
+        if (!menuOpenRef.current) setShowControls(false)
+      }, hideDelay)
     }
     return () => {
       if (hideTimer.current) clearTimeout(hideTimer.current)
@@ -1386,7 +1395,7 @@ export function VideoPlayer({
           </div>
 
           {/* Bottom row */}
-          <div className="flex items-center gap-1.5 sm:gap-3 overflow-x-auto scrollbar-hide">
+          <div className="flex items-center gap-1.5 sm:gap-3 overflow-visible">
             <button onClick={togglePlay} className="text-white hover:text-white/70 transition-colors flex-shrink-0 p-1">
               {isPlaying ? <PauseIcon className="w-5 h-5 sm:w-6 sm:h-6" /> : <PlayIcon className="w-5 h-5 sm:w-6 sm:h-6" />}
             </button>
