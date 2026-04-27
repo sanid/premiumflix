@@ -139,6 +139,13 @@ export function Home() {
   }
 
   if (!hasLibrary && !isLoading) {
+    // No API key configured at all — first-time user
+    const hasPmKey = !!(localStorage.getItem('pm_api_key') || import.meta.env.VITE_PM_API_KEY)
+    if (!hasPmKey) {
+      navigate('/setup', { replace: true })
+      return null
+    }
+
     return (
       <div className="min-h-screen bg-premiumflix-dark flex flex-col items-center justify-center gap-6 px-4 text-center">
         <div className="text-premiumflix-red font-black text-5xl">PREMIUMFLIX</div>

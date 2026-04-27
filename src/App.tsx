@@ -12,6 +12,7 @@ import { Search } from './pages/Search'
 import { AddMovie } from './pages/AddMovie'
 import { Management } from './pages/Management'
 import { Person } from './pages/Person'
+import { Setup } from './pages/Setup'
 import { LibraryProvider } from './contexts/LibraryContext'
 import { I18nProvider } from './contexts/I18nContext'
 
@@ -31,8 +32,9 @@ export default function App() {
       <LibraryProvider>
         <ScrollToTop />
       <Routes>
-        {/* Full-screen player — no navbar */}
+        {/* Full-screen — no navbar */}
         <Route path="/play/:mode/:mediaId/:fileId" element={<Player />} />
+        <Route path="/setup" element={<Setup />} />
 
         {/* Main layout with navbar */}
         <Route

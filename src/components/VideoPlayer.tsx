@@ -663,7 +663,7 @@ export function VideoPlayer({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isFullscreen, showControlsTemporarily, onBack])
+  }, [isFullscreen, showHelp, showControlsTemporarily, onBack])
 
   // ─── Seek bar ────────────────────────────────────────────────────────────
 
