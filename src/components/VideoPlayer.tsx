@@ -88,7 +88,11 @@ export function VideoPlayer({
   const [tapFeedback, setTapFeedback] = useState<{ side: 'left' | 'right'; count: number } | null>(null)
 
   // ─── Mobile detection ────────────────────────────────────────────────────
-  const isMobile = useMemo(() => 'ontouchstart' in window || navigator.maxTouchPoints > 0, [])
+  const isMobile = useMemo(() => {
+    const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    const isNarrowScreen = window.matchMedia('(max-width: 768px)').matches
+    return hasTouch && isNarrowScreen
+  }, [])
 
   // ─── Seek dragging (live preview) ─────────────────────────────────────────
   const [isSeekDragging, setIsSeekDragging] = useState(false)
