@@ -141,7 +141,7 @@ export function MovieDetail() {
 export function ShowDetail() {
   const { id } = useParams<{ id: string }>()
   const { tvShows, removeShowFromLibrary, isLoading, updateShowInLibrary, isFavorite, isOnWatchlist, toggleFavorite, toggleWatchlist } = useLibrary()
-  const { getProgressFraction } = useWatchProgress()
+  const { getProgressFraction, isFinished } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
 
@@ -257,6 +257,7 @@ export function ShowDetail() {
                   const fraction = getProgressFraction(ep.file.id)
                   const tmdbEp = ep.tmdbEpisode
                   const still = stillUrl(tmdbEp?.still_path)
+                  const watched = isFinished(ep.file.id)
 
                   return (
                     <div
@@ -274,10 +275,22 @@ export function ShowDetail() {
                           </div>
                         )}
                         {/* Progress */}
-                        {fraction > 0 && (
+                        {fraction > 0 && !watched && (
                           <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
                             <div className="h-full bg-premiumflix-red" style={{ width: `${fraction * 100}%` }} />
                           </div>
+                        )}
+                        {/* Watched checkmark */}
+                        {watched && (
+                          <div className="absolute top-1.5 right-1.5 bg-black/60 rounded-full w-6 h-6 flex items-center justify-center">
+                            <svg className="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                        )}
+                        {/* Watched overlay */}
+                        {watched && (
+                          <div className="absolute inset-0 bg-black/20" />
                         )}
                         {/* Play overlay */}
                         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">

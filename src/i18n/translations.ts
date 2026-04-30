@@ -41,12 +41,6 @@ export const translations = {
       noShowsFound: 'No shows found',
       tryAdjusting: 'Try adjusting your filters',
     },
-    watchlist: {
-      emptyTitle: 'My List is empty',
-      emptyDesc: 'Add movies and shows to your list by clicking the "+ My List" button on any title.',
-      watchlist: 'Watchlist',
-      favorites: 'Favorites ♥',
-    },
     detail: {
       movieNotFound: 'Movie not found',
       showNotFound: 'Show not found',
@@ -105,7 +99,26 @@ export const translations = {
       added: 'Added!',
       noTorrents: 'No torrents available.',
       failed: 'Failed to add movie.',
-    }
+    },
+    stats: {
+      title: 'Watch Statistics',
+      totalWatchTime: 'Total Watch Time',
+      moviesWatched: 'Movies Watched',
+      episodesWatched: 'Episodes Watched',
+      totalTime: 'hours',
+      topGenres: 'Top Genres',
+      recentlyWatched: 'Recently Watched',
+      mostWatchedGenre: 'Most Watched Genre',
+      librarySize: 'Library Size',
+      noData: 'Start watching to see your statistics!',
+    },
+    watchlist: {
+      emptyTitle: 'My List is empty',
+      emptyDesc: 'Add movies and shows to your list by clicking the "+ My List" button on any title.',
+      watchlist: 'Watchlist',
+      favorites: 'Favorites \u2665',
+      searchPlaceholder: 'Search your list...',
+    },
   },
   'de': {
     nav: {
@@ -153,7 +166,8 @@ export const translations = {
       emptyTitle: 'Meine Liste ist leer',
       emptyDesc: 'Füge Filme und Serien zu deiner Liste hinzu, indem du auf die Schaltfläche "+ Meine Liste" klickst.',
       watchlist: 'Merkliste',
-      favorites: 'Favoriten ♥',
+      favorites: 'Favoriten \u2665',
+      searchPlaceholder: 'Liste durchsuchen...',
     },
     detail: {
       movieNotFound: 'Film nicht gefunden',
@@ -213,7 +227,19 @@ export const translations = {
       added: 'Hinzugefügt!',
       noTorrents: 'Keine Torrents verfügbar.',
       failed: 'Fehler beim Hinzufügen des Films.',
-    }
+    },
+    stats: {
+      title: 'Statistiken',
+      totalWatchTime: 'Gesamte Sehdauer',
+      moviesWatched: 'Filme gesehen',
+      episodesWatched: 'Episoden gesehen',
+      totalTime: 'Stunden',
+      topGenres: 'Top Genres',
+      recentlyWatched: 'Kürzlich gesehen',
+      mostWatchedGenre: 'Meistgesehenes Genre',
+      librarySize: 'Bibliotheksgröße',
+      noData: 'Fang an zu schauen, um deine Statistiken zu sehen!',
+    },
   },
   // Add fallback definitions for generic handling
 };

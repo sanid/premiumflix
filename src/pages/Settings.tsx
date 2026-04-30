@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
 import { accountInfo } from '../services/premiumize'
 import { listFolder } from '../services/premiumize'
 import { isTMDB } from '../services/metadata'
-import type { ScanFolderSelection, PMItem } from '../types'
+import { saveLibrary } from '../db'
+import type { ScanFolderSelection, PMItem, Movie, TVShow } from '../types'
 import { useI18n } from '../contexts/I18nContext'
 
 export function Settings() {
@@ -18,6 +19,8 @@ export function Settings() {
   const [savedLang, setSavedLang] = useState(localStorage.getItem('tmdb_language') ?? 'en-US')
   const [saved, setSaved] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importStatus, setImportStatus] = useState<string | null>(null)
 
   const [accountData, setAccountData] = useState<{ premiumUntil?: number; spaceUsed?: number } | null>(null)
   const [accountError, setAccountError] = useState<string | null>(null)
@@ -27,7 +30,7 @@ export function Settings() {
     try {
       return JSON.parse(localStorage.getItem('scan_folders') ?? '[]')
     } catch {
-      /* corrupt value */ return []
+      return []
     }
   })
   const [loadingFolders, setLoadingFolders] = useState(false)
@@ -90,12 +93,50 @@ export function Settings() {
     return d.toLocaleDateString()
   }
 
+  function handleExport() {
+    const data = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      movies,
+      tvShows,
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `premiumflix_library_${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportStatus('Reading file...')
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text) as { movies?: Movie[]; tvShows?: TVShow[] }
+      if (!data.movies && !data.tvShows) {
+        setImportStatus('Invalid file: no movies or shows found.')
+        return
+      }
+      const importedMovies = data.movies ?? []
+      const importedShows = data.tvShows ?? []
+      await saveLibrary(importedMovies, importedShows)
+      setImportStatus(`Imported ${importedMovies.length} movies and ${importedShows.length} shows. Refreshing...`)
+      setTimeout(() => window.location.reload(), 1500)
+    } catch (err) {
+      setImportStatus('Failed to import: ' + (err instanceof Error ? err.message : 'Invalid file'))
+    }
+    e.target.value = ''
+  }
+
   return (
-    <div className="min-h-screen bg-premiumflix-dark pt-20 pb-16">
+    <div className="min-h-screen bg-premiumflix-dark pt-20 pb-24">
       <div className="max-w-2xl mx-auto px-4 sm:px-8">
         <h1 className="text-white text-3xl font-black mb-8">{t.settings.title}</h1>
 
-        {/* Account info */}
+        {/* ─── Account ─────────────────────────────────────────────────── */}
         <Section title={t.settings.pmAccount}>
           {accountError ? (
             <p className="text-premiumflix-red text-sm">{accountError}</p>
@@ -113,39 +154,23 @@ export function Settings() {
                   </span>
                 </div>
               )}
+              <div className="border-t border-white/10 pt-2 flex gap-6">
+                <div className="flex justify-between flex-1">
+                  <span className="text-premiumflix-muted">{t.settings.moviesInLibrary}</span>
+                  <span className="text-white font-medium">{movies.length}</span>
+                </div>
+                <div className="flex justify-between flex-1">
+                  <span className="text-premiumflix-muted">{t.settings.showsInLibrary}</span>
+                  <span className="text-white font-medium">{tvShows.length}</span>
+                </div>
+              </div>
             </div>
           ) : (
             <p className="text-premiumflix-muted text-sm animate-pulse">Loading...</p>
           )}
         </Section>
 
-        {/* Metadata Source */}
-        <Section title="Metadata Source">
-          <div className={`flex items-center gap-3 rounded-md px-4 py-3 mb-4 ${
-            isTMDB()
-              ? 'bg-blue-500/10 border border-blue-500/30'
-              : 'bg-green-500/10 border border-green-500/30'
-          }`}>
-            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isTMDB() ? 'bg-blue-400' : 'bg-green-400'}`} />
-            <div>
-              <p className={`text-sm font-medium ${isTMDB() ? 'text-blue-300' : 'text-green-300'}`}>
-                {isTMDB() ? 'TMDB (The Movie Database)' : 'IMDb via imdbapi.dev'}
-              </p>
-              <p className="text-premiumflix-muted/70 text-xs mt-0.5">
-                {isTMDB()
-                  ? 'Using TMDB — trailers, taglines, and localized metadata available'
-                  : 'Free, no API key required — trailers and taglines not available'}
-              </p>
-            </div>
-          </div>
-          <p className="text-premiumflix-muted/60 text-xs leading-relaxed">
-            imdbapi.dev is used by default and requires no setup. Add a TMDB key below to unlock
-            YouTube trailers, movie taglines, localized metadata, and better logo images.
-            A rescan is required after changing the source.
-          </p>
-        </Section>
-
-        {/* API Keys */}
+        {/* ─── API Keys & Language ──────────────────────────────────────── */}
         <Section title={t.settings.apiKeys}>
           <div className="space-y-4">
             <div>
@@ -182,79 +207,61 @@ export function Settings() {
                   </p>
                 </div>
               ) : (
-                <>
-                  <input
-                    type="text"
-                    value={tmdbKey}
-                    onChange={(e) => setTmdbKey(e.target.value)}
-                    className="w-full bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none focus:border-white/40"
-                    placeholder="Leave empty to use imdbapi.dev (free, no key needed)"
-                  />
-                  <p className="text-premiumflix-muted/60 text-xs mt-1">
-                    Get a free key at themoviedb.org — enables trailers, taglines &amp; localized metadata
-                  </p>
-                  {tmdbKey.trim() && (
-                    <div className="mt-2 flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
-                      <span className="text-amber-400 text-xs">⚠</span>
-                      <p className="text-amber-300 text-xs">Save and rescan your library to apply the new metadata source.</p>
-                    </div>
-                  )}
-                </>
+                <input
+                  type="text"
+                  value={tmdbKey}
+                  onChange={(e) => setTmdbKey(e.target.value)}
+                  className="w-full bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none focus:border-white/40"
+                  placeholder="Leave empty to use imdbapi.dev (free, no key needed)"
+                />
+              )}
+              <p className="text-premiumflix-muted/60 text-xs mt-1">
+                Get a free key at themoviedb.org — enables trailers, taglines &amp; localized metadata
+              </p>
+            </div>
+
+            <div>
+              <label className="text-premiumflix-muted text-sm block mb-1">{t.settings.metadataLang}</label>
+              {!isTMDB() && (
+                <p className="text-premiumflix-muted/60 text-xs mb-2">
+                  Language requires a TMDB key. imdbapi.dev provides English metadata only.
+                </p>
+              )}
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                disabled={!isTMDB()}
+                className="w-full bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <option value="en-US">English (US)</option>
+                <option value="de-DE">German (DE)</option>
+                <option value="fr-FR">French (FR)</option>
+                <option value="es-ES">Spanish (ES)</option>
+                <option value="ja-JP">Japanese (JP)</option>
+                <option value="ko-KR">Korean (KR)</option>
+                <option value="it-IT">Italian (IT)</option>
+                <option value="ar-SA">Arabic (SA)</option>
+                <option value="pt-BR">Portuguese (BR)</option>
+                <option value="ru-RU">Russian (RU)</option>
+                <option value="zh-CN">Chinese (CN)</option>
+                <option value="nl-NL">Dutch (NL)</option>
+                <option value="pl-PL">Polish (PL)</option>
+                <option value="tr-TR">Turkish (TR)</option>
+              </select>
+              {languageChanged && (
+                <div className="mt-2 flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+                  <span className="text-amber-400 text-xs">⚠</span>
+                  <p className="text-amber-300 text-xs">{t.settings.langWarning}</p>
+                </div>
               )}
             </div>
           </div>
         </Section>
 
-        {/* Language */}
-        <Section title={t.settings.metadataLang}>
-          {!isTMDB() && (
-            <div className="mb-3 flex items-start gap-2 bg-premiumflix-surface border border-white/10 rounded-md px-3 py-2.5">
-              <span className="text-premiumflix-muted/60 text-xs mt-0.5">ℹ</span>
-              <p className="text-premiumflix-muted/70 text-xs leading-relaxed">
-                Language selection only applies when a TMDB key is set. imdbapi.dev provides English metadata only.
-              </p>
-            </div>
-          )}
-          <select
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            disabled={!isTMDB()}
-            className="bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none cursor-pointer w-full disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <option value="en-US">English (US)</option>
-            <option value="de-DE">German (DE)</option>
-            <option value="fr-FR">French (FR)</option>
-            <option value="es-ES">Spanish (ES)</option>
-            <option value="ja-JP">Japanese (JP)</option>
-            <option value="ko-KR">Korean (KR)</option>
-            <option value="it-IT">Italian (IT)</option>
-            <option value="ar-SA">Arabic (SA)</option>
-            <option value="pt-BR">Portuguese (BR)</option>
-            <option value="ru-RU">Russian (RU)</option>
-            <option value="zh-CN">Chinese (CN)</option>
-            <option value="nl-NL">Dutch (NL)</option>
-            <option value="pl-PL">Polish (PL)</option>
-            <option value="tr-TR">Turkish (TR)</option>
-          </select>
-          {isTMDB() && (
-            <p className="text-premiumflix-muted/60 text-xs mt-2">
-              Controls the language used for titles, overviews, and metadata fetched from TMDB.
-            </p>
-          )}
-          {languageChanged && isTMDB() && (
-            <div className="mt-3 flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2.5">
-              <span className="text-amber-400 mt-0.5">⚠</span>
-              <p className="text-amber-300 text-xs leading-relaxed">
-                {t.settings.langWarning}
-              </p>
-            </div>
-          )}
-        </Section>
-
-        {/* Scan folder selection */}
+        {/* ─── Scan Folders ─────────────────────────────────────────────── */}
         <Section title={t.settings.scanFolders}>
           <p className="text-premiumflix-muted text-sm mb-3">
-            Select which Premiumize folders to scan. Leave empty to auto-detect "Movies" and "Series" folders.
+            Select which Premiumize folders to scan. Leave empty to auto-detect.
           </p>
 
           {folders.length === 0 ? (
@@ -301,21 +308,92 @@ export function Settings() {
           )}
 
           {selectedFolders.length > 0 && (
-            <div className="mt-3">
-              <p className="text-premiumflix-muted text-xs mb-1">Selected:</p>
-              <div className="flex flex-wrap gap-2">
-                {selectedFolders.map((f) => (
-                  <span key={f.id} className="text-xs bg-premiumflix-surface border border-white/20 text-white px-2 py-1 rounded">
-                    {f.name} ({f.kind === 'movies' ? '🎬' : '📺'})
-                  </span>
-                ))}
-              </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {selectedFolders.map((f) => (
+                <span key={f.id} className="text-xs bg-premiumflix-surface border border-white/20 text-white px-2 py-1 rounded">
+                  {f.name} ({f.kind === 'movies' ? '🎬' : '📺'})
+                </span>
+              ))}
             </div>
           )}
         </Section>
 
-        {/* Save */}
-        <div className="flex flex-wrap gap-3 mt-6">
+        {/* ─── Backup & Restore ─────────────────────────────────────────── */}
+        <Section title="Backup & Restore">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              onClick={restoreFromCloud}
+              disabled={isLoading}
+              className="bg-premiumflix-surface border border-white/10 rounded-lg p-4 text-left hover:bg-premiumflix-card transition-colors disabled:opacity-50 group"
+            >
+              <CloudIcon className="w-5 h-5 text-premiumflix-muted group-hover:text-white transition-colors mb-2" />
+              <p className="text-white text-sm font-semibold">Cloud Restore</p>
+              <p className="text-premiumflix-muted/60 text-xs mt-1">Auto-backed up to Premiumize</p>
+            </button>
+            <button
+              onClick={handleExport}
+              disabled={movies.length === 0 && tvShows.length === 0}
+              className="bg-premiumflix-surface border border-white/10 rounded-lg p-4 text-left hover:bg-premiumflix-card transition-colors disabled:opacity-50 group"
+            >
+              <DownloadIcon className="w-5 h-5 text-premiumflix-muted group-hover:text-white transition-colors mb-2" />
+              <p className="text-white text-sm font-semibold">Export JSON</p>
+              <p className="text-premiumflix-muted/60 text-xs mt-1">Download library as file</p>
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-premiumflix-surface border border-white/10 rounded-lg p-4 text-left hover:bg-premiumflix-card transition-colors group"
+            >
+              <UploadIcon className="w-5 h-5 text-premiumflix-muted group-hover:text-white transition-colors mb-2" />
+              <p className="text-white text-sm font-semibold">Import JSON</p>
+              <p className="text-premiumflix-muted/60 text-xs mt-1">Restore from exported file</p>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleImport}
+            />
+          </div>
+          {importStatus && (
+            <p className={`text-sm mt-3 ${importStatus.startsWith('Failed') || importStatus.startsWith('Invalid') ? 'text-red-400' : 'text-green-400'}`}>
+              {importStatus}
+            </p>
+          )}
+        </Section>
+
+        {/* ─── Library Actions ──────────────────────────────────────────── */}
+        <Section title={t.settings.library}>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => scan(selectedFolders.length ? selectedFolders : undefined)}
+              disabled={isLoading}
+              className="bg-white/10 text-white text-sm font-medium px-4 py-2 rounded hover:bg-white/20 transition-colors disabled:opacity-50"
+            >
+              {isLoading ? 'Scanning...' : t.settings.scanLibrary}
+            </button>
+            <button
+              onClick={() => {
+                if (showClearConfirm) {
+                  clearAndRescan(selectedFolders.length ? selectedFolders : undefined)
+                  setShowClearConfirm(false)
+                } else {
+                  setShowClearConfirm(true)
+                  setTimeout(() => setShowClearConfirm(false), 4000)
+                }
+              }}
+              disabled={isLoading}
+              className={`text-sm font-medium px-4 py-2 rounded transition-colors disabled:opacity-50 ${showClearConfirm ? 'bg-red-700 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'}`}
+            >
+              {showClearConfirm ? 'Tap again to confirm' : t.settings.clearRescan}
+            </button>
+          </div>
+        </Section>
+      </div>
+
+      {/* ─── Sticky Save Bar ──────────────────────────────────────────── */}
+      <div className="fixed bottom-0 left-0 right-0 bg-premiumflix-dark/95 backdrop-blur border-t border-white/10 py-3 px-4 sm:px-8 z-40">
+        <div className="max-w-2xl mx-auto flex items-center gap-3">
           <button
             onClick={saveSettings}
             disabled={isLoading}
@@ -337,84 +415,6 @@ export function Settings() {
             </button>
           )}
         </div>
-
-        {/* Cloud Sync */}
-        <Section title="Cloud Backup">
-          <p className="text-premiumflix-muted text-sm mb-4 leading-relaxed">
-            Your library metadata is automatically backed up to your Premiumize cloud as <code className="bg-white/10 px-1 rounded">premiumflix_library.json</code>.
-            This allows you to instantly load your library on other devices without scanning.
-          </p>
-          <div className="bg-premiumflix-surface border border-white/10 rounded-lg p-4">
-            <button
-              onClick={restoreFromCloud}
-              disabled={isLoading}
-              className="w-full bg-white text-black font-bold py-2.5 rounded hover:bg-white/80 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-              </svg>
-              {isLoading ? 'Processing...' : 'Restore Library from Cloud'}
-            </button>
-            <p className="text-premiumflix-muted/60 text-xs mt-3 text-center">
-              Last backup: {movies.length > 0 || tvShows.length > 0 ? 'Automatic' : 'None'}
-            </p>
-          </div>
-        </Section>
-
-        {/* Library management */}
-        <Section title={t.settings.library}>
-          <div className="space-y-3">
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-premiumflix-muted">{t.settings.moviesInLibrary}</span>
-              <span className="text-white font-medium">{movies.length}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-premiumflix-muted">{t.settings.showsInLibrary}</span>
-              <span className="text-white font-medium">{tvShows.length}</span>
-            </div>
-
-            <div className="border-t border-white/10 pt-3 flex flex-wrap gap-3">
-              <button
-                onClick={() => scan(selectedFolders.length ? selectedFolders : undefined)}
-                disabled={isLoading}
-                className="bg-white/10 text-white text-sm font-medium px-4 py-2 rounded hover:bg-white/20 transition-colors disabled:opacity-50"
-              >
-                {isLoading ? 'Scanning...' : t.settings.scanLibrary}
-              </button>
-              <button
-                onClick={() => {
-                  if (showClearConfirm) {
-                    clearAndRescan(selectedFolders.length ? selectedFolders : undefined)
-                    setShowClearConfirm(false)
-                  } else {
-                    setShowClearConfirm(true)
-                    setTimeout(() => setShowClearConfirm(false), 4000)
-                  }
-                }}
-                disabled={isLoading}
-                className={`text-sm font-medium px-4 py-2 rounded transition-colors disabled:opacity-50 ${showClearConfirm ? 'bg-red-700 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'}`}
-              >
-                {showClearConfirm ? 'Tap again to confirm' : t.settings.clearRescan}
-              </button>
-              <button
-                onClick={() => navigate('/')}
-                className="text-premiumflix-red text-sm font-medium px-4 py-2 rounded hover:bg-premiumflix-red/10 transition-colors"
-              >
-                {t.settings.goHome}
-              </button>
-            </div>
-          </div>
-        </Section>
-
-        {/* Note about CORS */}
-        <Section title="Network Note">
-          <p className="text-premiumflix-muted text-xs leading-relaxed">
-            Premiumize and imdbapi.dev are both proxied through Vite to work around browser CORS restrictions.
-            This means the app must be served via <code className="bg-white/10 px-1 rounded">npm run dev</code> or{' '}
-            <code className="bg-white/10 px-1 rounded">npm run preview</code>.
-            If you deploy to a static host, use a TMDB key instead — TMDB supports CORS natively.
-          </p>
-        </Section>
       </div>
     </div>
   )
@@ -426,5 +426,29 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <h2 className="text-white font-bold text-base mb-4 pb-2 border-b border-white/10">{title}</h2>
       {children}
     </div>
+  )
+}
+
+function CloudIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+    </svg>
+  )
+}
+
+function DownloadIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>
+  )
+}
+
+function UploadIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+    </svg>
   )
 }

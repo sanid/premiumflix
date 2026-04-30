@@ -13,14 +13,16 @@ import { useI18n } from '../contexts/I18nContext'
 interface HeroMovieProps {
   movie: Movie
   onPlay: () => void
+  onSurprise?: () => void
 }
 
 interface HeroShowProps {
   show: TVShow
   onPlay: () => void
+  onSurprise?: () => void
 }
 
-export function HeroMovie({ movie, onPlay }: HeroMovieProps) {
+export function HeroMovie({ movie, onPlay, onSurprise }: HeroMovieProps) {
   const navigate = useNavigate()
   const title = movieDisplayTitle(movie)
   const backdrop = movieBackdropUrl(movie)
@@ -43,11 +45,12 @@ export function HeroMovie({ movie, onPlay }: HeroMovieProps) {
       genres={genres}
       onPlay={onPlay}
       onInfo={() => navigate(`/movie/${movie.id}`)}
+      onSurprise={onSurprise}
     />
   )
 }
 
-export function HeroShow({ show, onPlay }: HeroShowProps) {
+export function HeroShow({ show, onPlay, onSurprise }: HeroShowProps) {
   const navigate = useNavigate()
   const title = showDisplayTitle(show)
   const backdrop = showBackdropUrl(show)
@@ -70,6 +73,7 @@ export function HeroShow({ show, onPlay }: HeroShowProps) {
       genres={genres}
       onPlay={onPlay}
       onInfo={() => navigate(`/show/${show.id}`)}
+      onSurprise={onSurprise}
     />
   )
 }
@@ -85,6 +89,7 @@ interface HeroShellProps {
   genres?: string[]
   onPlay: () => void
   onInfo: () => void
+  onSurprise?: () => void
 }
 
 function HeroShell({
@@ -98,6 +103,7 @@ function HeroShell({
   genres,
   onPlay,
   onInfo,
+  onSurprise,
 }: HeroShellProps) {
   const { t } = useI18n()
   return (
@@ -171,6 +177,15 @@ function HeroShell({
             <InfoIcon className="w-5 h-5" />
             {t.home.moreInfo}
           </button>
+          {onSurprise && (
+            <button
+              onClick={onSurprise}
+              className="flex items-center gap-2 bg-premiumflix-red/80 backdrop-blur-sm text-white font-bold px-6 py-2.5 rounded hover:bg-premiumflix-red transition-colors text-sm sm:text-base"
+            >
+              <DiceIcon className="w-5 h-5" />
+              Surprise Me
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -189,6 +204,19 @@ function InfoIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+}
+
+function DiceIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <circle cx="8.5" cy="8.5" r="1" fill="currentColor" />
+      <circle cx="15.5" cy="8.5" r="1" fill="currentColor" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" />
+      <circle cx="8.5" cy="15.5" r="1" fill="currentColor" />
+      <circle cx="15.5" cy="15.5" r="1" fill="currentColor" />
     </svg>
   )
 }

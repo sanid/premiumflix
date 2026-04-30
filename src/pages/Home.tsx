@@ -12,7 +12,7 @@ import type { Movie, TVShow } from '../types'
 export function Home() {
   const { movies, tvShows, isLoading, scanProgress, hasLibrary, scan } = useLibrary()
   const { favoriteIds, watchlistIds } = useCollection()
-  const { inProgress, getProgressFraction, removeProgress } = useWatchProgress()
+  const { inProgress, getProgressFraction, removeProgress, isFinished } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
 
@@ -90,14 +90,37 @@ export function Home() {
   function handleHeroPlay() {
     if (!featured) return
     if ('files' in featured) {
-      // Movie
       const movie = featured as Movie
       const file = movieMainFile(movie)
       if (file) navigate(`/play/movie/${movie.id}/${file.id}`)
       else navigate(`/movie/${movie.id}`)
     } else {
-      // TV Show
       const show = featured as TVShow
+      const firstEp = show.seasons[0]?.episodes[0]
+      if (firstEp) navigate(`/play/show/${show.id}/${firstEp.file.id}`)
+      else navigate(`/show/${show.id}`)
+    }
+  }
+
+  function handleSurpriseMe() {
+    const unwatched = [
+      ...movies.filter(m => {
+        const mainFile = movieMainFile(m)
+        return mainFile && !isFinished(mainFile.id) && (m.tmdbDetail?.vote_average ?? 0) >= 6
+      }),
+      ...tvShows.filter(s => {
+        const firstEp = s.seasons[0]?.episodes[0]
+        return firstEp && !isFinished(firstEp.file.id) && (s.tmdbDetail?.vote_average ?? 0) >= 6
+      }),
+    ]
+    if (unwatched.length === 0) return
+    const pick = unwatched[Math.floor(Math.random() * unwatched.length)]
+    if ('files' in pick) {
+      const file = movieMainFile(pick as Movie)
+      if (file) navigate(`/play/movie/${pick.id}/${file.id}`)
+      else navigate(`/movie/${pick.id}`)
+    } else {
+      const show = pick as TVShow
       const firstEp = show.seasons[0]?.episodes[0]
       if (firstEp) navigate(`/play/show/${show.id}/${firstEp.file.id}`)
       else navigate(`/show/${show.id}`)
@@ -177,9 +200,9 @@ export function Home() {
       {featured && (
         <div className="relative">
           {'files' in featured ? (
-            <HeroMovie movie={featured as Movie} onPlay={handleHeroPlay} />
+            <HeroMovie movie={featured as Movie} onPlay={handleHeroPlay} onSurprise={handleSurpriseMe} />
           ) : (
-            <HeroShow show={featured as TVShow} onPlay={handleHeroPlay} />
+            <HeroShow show={featured as TVShow} onPlay={handleHeroPlay} onSurprise={handleSurpriseMe} />
           )}
         </div>
       )}

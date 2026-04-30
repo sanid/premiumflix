@@ -12,6 +12,7 @@ import { Search } from './pages/Search'
 import { AddMovie } from './pages/AddMovie'
 import { Management } from './pages/Management'
 import { Person } from './pages/Person'
+import { Stats } from './pages/Stats'
 import { Setup } from './pages/Setup'
 import { LibraryProvider } from './contexts/LibraryContext'
 import { I18nProvider } from './contexts/I18nContext'
@@ -53,6 +54,7 @@ export default function App() {
                 <Route path="/movie/:id" element={<MovieDetail />} />
                 <Route path="/show/:id" element={<ShowDetail />} />
                 <Route path="/person/:id" element={<Person />} />
+                <Route path="/stats" element={<Stats />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>

@@ -6,13 +6,15 @@ import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl } fr
 
 export function Navbar() {
   const { t } = useI18n()
-  const { movies, tvShows } = useLibrary()
+  const { movies, tvShows, notifications, dismissNotification } = useLibrary()
   const [scrolled, setScrolled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const [notifOpen, setNotifOpen] = useState(false)
   const navigate = useNavigate()
   const searchRef = useRef<HTMLDivElement>(null)
+  const notifRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20)
@@ -20,18 +22,39 @@ export function Navbar() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === '/' && !searchOpen && !e.ctrlKey && !e.metaKey) {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+      if (e.key === 'Escape') {
+        if (searchOpen) { setSearchOpen(false); setSearchQuery('') }
+        if (notifOpen) setNotifOpen(false)
+        if (menuOpen) setMenuOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [searchOpen, notifOpen, menuOpen])
+
   // Close dropdown on outside click
   useEffect(() => {
-    if (!searchOpen) return
+    if (!searchOpen && !notifOpen) return
     function onClick(e: MouseEvent) {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+      if (searchOpen && searchRef.current && !searchRef.current.contains(e.target as Node)) {
         setSearchOpen(false)
         setSearchQuery('')
+      }
+      if (notifOpen && notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false)
       }
     }
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
-  }, [searchOpen])
+  }, [searchOpen, notifOpen])
 
   // Library search results (inline)
   const libraryResults = useMemo(() => {
@@ -97,6 +120,7 @@ export function Navbar() {
             <NavLink to="/watchlist" className={navLinkClass}>{t.nav.myList}</NavLink>
             <NavLink to="/add-movie" className={navLinkClass}>{t.home.addMovie}</NavLink>
             <NavLink to="/management" className={navLinkClass}>Manage</NavLink>
+            <NavLink to="/stats" className={navLinkClass}>Stats</NavLink>
           </div>
 
           {/* Right side */}
@@ -187,6 +211,49 @@ export function Navbar() {
               )}
             </div>
 
+            {/* Notification Bell */}
+            <div className="relative" ref={notifRef}>
+              <button
+                onClick={() => setNotifOpen(!notifOpen)}
+                className="relative text-premiumflix-muted hover:text-white transition-colors p-1"
+              >
+                <BellIcon />
+                {notifications.length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 bg-premiumflix-red text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                    {notifications.length > 9 ? '9+' : notifications.length}
+                  </span>
+                )}
+              </button>
+
+              {notifOpen && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-premiumflix-surface border border-white/20 rounded-lg shadow-2xl overflow-hidden z-[60]">
+                  <div className="px-4 py-2.5 border-b border-white/10 flex items-center justify-between">
+                    <span className="text-white text-sm font-bold">Notifications</span>
+                    {notifications.length > 0 && (
+                      <button
+                        onClick={() => { for (let i = notifications.length - 1; i >= 0; i--) dismissNotification(i) }}
+                        className="text-premiumflix-muted text-xs hover:text-white"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <p className="text-premiumflix-muted text-sm text-center py-6">No notifications</p>
+                    ) : (
+                      notifications.map((note, i) => (
+                        <div key={i} className="flex items-start gap-2 px-4 py-3 hover:bg-white/5 border-b border-white/5 last:border-0">
+                          <p className="text-white text-sm flex-1">{note}</p>
+                          <button onClick={() => dismissNotification(i)} className="text-white/40 hover:text-white text-xs flex-shrink-0 mt-0.5">✕</button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Settings */}
             <NavLink to="/settings" className="text-premiumflix-muted hover:text-white transition-colors p-1">
               <SettingsIcon />
@@ -212,6 +279,7 @@ export function Navbar() {
               { to: '/watchlist', label: t.nav.myList },
               { to: '/add-movie', label: t.home.addMovie },
               { to: '/management', label: 'Manage' },
+              { to: '/stats', label: 'Stats' },
             ].map(({ to, label }) => (
               <NavLink
                 key={to}
@@ -261,6 +329,14 @@ function MenuIcon() {
   return (
     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  )
+}
+
+function BellIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
     </svg>
   )
 }
