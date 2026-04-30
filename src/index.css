@@ -20,8 +20,20 @@
     margin: 0;
     padding: 0;
     overflow-x: hidden;
-    /* Prevent overscroll bounce on iOS */
     overscroll-behavior: none;
+    -webkit-standalone: standalone;
+  }
+
+  html, body, #root {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  body {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
   }
 
   /* Safe area insets for notched phones */

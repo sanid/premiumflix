@@ -1,0 +1,24 @@
+{
+  "name": "Premiumflix",
+  "short_name": "Premiumflix",
+  "description": "Your personal streaming library powered by Premiumize",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#141414",
+  "theme_color": "#E50914",
+  "orientation": "any",
+  "categories": ["entertainment", "multimedia"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
