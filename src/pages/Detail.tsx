@@ -21,7 +21,7 @@ import { useI18n } from '../contexts/I18nContext'
 export function MovieDetail() {
   const { id } = useParams<{ id: string }>()
   const { movies, removeMovieFromLibrary, isLoading, updateMovieInLibrary, isFavorite, isOnWatchlist, toggleFavorite, toggleWatchlist } = useLibrary()
-  const { getProgressFraction, isFinished } = useWatchProgress()
+  const { getProgressFraction, isFinished, markWatched, removeProgress } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
   const [deleteConfirm, setDeleteConfirm] = useState(false)
@@ -93,10 +93,15 @@ export function MovieDetail() {
       trailerKey={movie.trailerKey}
       isFavorite={fav}
       isOnWatchlist={wl}
+      isWatched={mainFile ? isFinished(mainFile.id) : false}
       progressFraction={progress}
       onPlay={() => play()}
       onToggleFavorite={() => toggleFavorite(movie!.id, 'movie')}
       onToggleWatchlist={() => toggleWatchlist(movie!.id, 'movie')}
+      onToggleWatched={mainFile ? () => {
+        if (isFinished(mainFile.id)) removeProgress(mainFile.id)
+        else markWatched(mainFile.id)
+      } : undefined}
       onDelete={() => {
         if (deleteConfirm) {
           removeMovieFromLibrary(movie!.id).then(() => navigate('/'))
@@ -141,7 +146,7 @@ export function MovieDetail() {
 export function ShowDetail() {
   const { id } = useParams<{ id: string }>()
   const { tvShows, removeShowFromLibrary, isLoading, updateShowInLibrary, isFavorite, isOnWatchlist, toggleFavorite, toggleWatchlist } = useLibrary()
-  const { getProgressFraction, isFinished } = useWatchProgress()
+  const { getProgressFraction, isFinished, markFilesWatched, clearFilesWatched } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
 
@@ -193,6 +198,10 @@ export function ShowDetail() {
   const sortedSeasons = [...show.seasons].sort((a, b) => a.number - b.number)
   const currentSeason = sortedSeasons[selectedSeason]
 
+  const allEpisodeFileIds = show.seasons.flatMap((s) => s.episodes.map((e) => e.file.id))
+  const showWatched = allEpisodeFileIds.length > 0 && allEpisodeFileIds.every((fid) => isFinished(fid))
+  const seasonWatched = !!currentSeason && currentSeason.episodes.length > 0 && currentSeason.episodes.every((e) => isFinished(e.file.id))
+
   function playEpisode(ep: Episode) {
     navigate(`/play/show/${show!.id}/${ep.file.id}`)
   }
@@ -212,6 +221,7 @@ export function ShowDetail() {
       trailerKey={show.trailerKey}
       isFavorite={fav}
       isOnWatchlist={wl}
+      isWatched={showWatched}
       progressFraction={0}
       onPlay={() => {
         const firstEp = sortedSeasons[0]?.episodes[0]
@@ -219,6 +229,10 @@ export function ShowDetail() {
       }}
       onToggleFavorite={() => toggleFavorite(show.id, 'show')}
       onToggleWatchlist={() => toggleWatchlist(show.id, 'show')}
+      onToggleWatched={allEpisodeFileIds.length > 0 ? () => {
+        if (showWatched) clearFilesWatched(allEpisodeFileIds)
+        else markFilesWatched(allEpisodeFileIds)
+      } : undefined}
       onDelete={() => {
         if (deleteConfirm) {
           removeShowFromLibrary(show!.id).then(() => navigate('/'))
@@ -246,6 +260,25 @@ export function ShowDetail() {
                   </option>
                 ))}
               </select>
+            )}
+            {currentSeason && currentSeason.episodes.length > 0 && (
+              <button
+                onClick={() => {
+                  const fids = currentSeason.episodes.map((e) => e.file.id)
+                  if (seasonWatched) clearFilesWatched(fids)
+                  else markFilesWatched(fids)
+                }}
+                className={`ml-auto text-xs font-medium px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  seasonWatched
+                    ? 'bg-green-600/80 text-white'
+                    : 'bg-premiumflix-surface border border-white/20 text-premiumflix-muted hover:text-white'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+                {seasonWatched ? t.detail.markUnwatched : t.detail.markWatched}
+              </button>
             )}
           </div>
 
@@ -351,10 +384,12 @@ interface DetailShellProps {
   trailerKey?: string
   isFavorite: boolean
   isOnWatchlist: boolean
+  isWatched?: boolean
   progressFraction: number
   onPlay: () => void
   onToggleFavorite: () => void
   onToggleWatchlist: () => void
+  onToggleWatched?: () => void
   onDelete?: () => void
   deleteConfirm?: boolean
   children?: React.ReactNode
@@ -375,10 +410,12 @@ function DetailShell({
   trailerKey,
   isFavorite,
   isOnWatchlist,
+  isWatched,
   progressFraction,
   onPlay,
   onToggleFavorite,
   onToggleWatchlist,
+  onToggleWatched,
   onDelete,
   deleteConfirm,
   children,
@@ -483,6 +520,22 @@ function DetailShell({
                 <HeartIcon className="w-5 h-5" filled={isFavorite} />
                 {isFavorite ? t.detail.liked : t.detail.like}
               </button>
+
+              {onToggleWatched && (
+                <button
+                  onClick={onToggleWatched}
+                  className={`flex items-center gap-2 font-bold px-5 py-2.5 rounded transition-colors ${
+                    isWatched
+                      ? 'bg-green-600/80 text-white'
+                      : 'bg-premiumflix-surface border border-white/20 text-white hover:bg-premiumflix-card'
+                  }`}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                  {isWatched ? t.detail.markUnwatched : t.detail.markWatched}
+                </button>
+              )}
 
               {trailerKey && (
                 <button

@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getAllProgress, saveProgress as dbSaveProgress, clearProgress, getProgress } from '../db'
+import {
+  getAllProgress,
+  saveProgress as dbSaveProgress,
+  clearProgress,
+  getProgress,
+  setFileWatched as dbSetFileWatched,
+  setFilesWatched as dbSetFilesWatched,
+} from '../db'
 import type { WatchProgress } from '../types'
 import { isProgressFinished, hasProgress } from '../types'
 
@@ -30,6 +37,39 @@ export function useWatchProgress() {
     })
   }, [])
 
+  // Manually mark a file as fully watched
+  const markWatched = useCallback(async (fileId: string) => {
+    await dbSetFileWatched(fileId)
+    setProgressMap((prev) => {
+      const next = new Map(prev)
+      next.set(fileId, { fileId, position: 1, duration: 1, lastWatched: Date.now() })
+      return next
+    })
+  }, [])
+
+  // Manually mark many files as fully watched (e.g. a whole season)
+  const markFilesWatched = useCallback(async (fileIds: string[]) => {
+    if (fileIds.length === 0) return
+    await dbSetFilesWatched(fileIds)
+    const now = Date.now()
+    setProgressMap((prev) => {
+      const next = new Map(prev)
+      for (const fileId of fileIds) next.set(fileId, { fileId, position: 1, duration: 1, lastWatched: now })
+      return next
+    })
+  }, [])
+
+  // Clear watch state for many files (mark unwatched)
+  const clearFilesWatched = useCallback(async (fileIds: string[]) => {
+    if (fileIds.length === 0) return
+    await Promise.all(fileIds.map((fileId) => clearProgress(fileId)))
+    setProgressMap((prev) => {
+      const next = new Map(prev)
+      for (const fileId of fileIds) next.delete(fileId)
+      return next
+    })
+  }, [])
+
   const getProgressForFile = useCallback(
     (fileId: string): WatchProgress | undefined => progressMap.get(fileId),
     [progressMap],
@@ -45,6 +85,9 @@ export function useWatchProgress() {
     inProgress,
     saveProgress,
     removeProgress,
+    markWatched,
+    markFilesWatched,
+    clearFilesWatched,
     getProgressForFile,
     isFinished: (fileId: string) => {
       const p = progressMap.get(fileId)
