@@ -4,8 +4,8 @@ import { useLibrary } from '../contexts/LibraryContext'
 import { accountInfo } from '../services/premiumize'
 import { listFolder } from '../services/premiumize'
 import { isTMDB } from '../services/metadata'
-import { saveLibrary } from '../db'
-import type { ScanFolderSelection, PMItem, Movie, TVShow } from '../types'
+import { exportLibraryData, importLibraryData, clearMetaCache, type LibraryBackup } from '../db'
+import type { ScanFolderSelection, PMItem } from '../types'
 import { useI18n } from '../contexts/I18nContext'
 
 export function Settings() {
@@ -93,18 +93,13 @@ export function Settings() {
     return d.toLocaleDateString()
   }
 
-  function handleExport() {
-    const data = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      movies,
-      tvShows,
-    }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  async function handleExport() {
+    const backup = await exportLibraryData()
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `premiumflix_library_${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `premiumflix_backup_${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -115,15 +110,27 @@ export function Settings() {
     setImportStatus('Reading file...')
     try {
       const text = await file.text()
-      const data = JSON.parse(text) as { movies?: Movie[]; tvShows?: TVShow[] }
+      const data = JSON.parse(text) as Partial<LibraryBackup>
       if (!data.movies && !data.tvShows) {
         setImportStatus('Invalid file: no movies or shows found.')
         return
       }
-      const importedMovies = data.movies ?? []
-      const importedShows = data.tvShows ?? []
-      await saveLibrary(importedMovies, importedShows)
-      setImportStatus(`Imported ${importedMovies.length} movies and ${importedShows.length} shows. Refreshing...`)
+      await importLibraryData({
+        version: 1,
+        exportedAt: Date.now(),
+        movies: data.movies ?? [],
+        tvShows: data.tvShows ?? [],
+        favorites: data.favorites ?? [],
+        watchlist: data.watchlist ?? [],
+        watchProgress: data.watchProgress ?? [],
+      })
+      const counts: string[] = []
+      counts.push(`${data.movies?.length ?? 0} movies`)
+      counts.push(`${data.tvShows?.length ?? 0} shows`)
+      if (data.favorites?.length) counts.push(`${data.favorites.length} favorites`)
+      if (data.watchlist?.length) counts.push(`${data.watchlist.length} list items`)
+      if (data.watchProgress?.length) counts.push(`${data.watchProgress.length} progress entries`)
+      setImportStatus(`Imported ${counts.join(', ')}. Refreshing...`)
       setTimeout(() => window.location.reload(), 1500)
     } catch (err) {
       setImportStatus('Failed to import: ' + (err instanceof Error ? err.message : 'Invalid file'))
@@ -387,7 +394,22 @@ export function Settings() {
             >
               {showClearConfirm ? 'Tap again to confirm' : t.settings.clearRescan}
             </button>
+            <button
+              onClick={async () => {
+                await clearMetaCache()
+                setImportStatus('Metadata cache cleared. Next scan will refetch all metadata.')
+                setTimeout(() => setImportStatus(null), 5000)
+              }}
+              disabled={isLoading}
+              className="bg-white/10 text-white text-sm font-medium px-4 py-2 rounded hover:bg-white/20 transition-colors disabled:opacity-50"
+              title="Removes cached TMDB metadata so the next scan refetches it"
+            >
+              Clear Metadata Cache
+            </button>
           </div>
+          <p className="text-premiumflix-muted/60 text-xs mt-2">
+            Scan results are cached locally — rescans only fetch metadata for new titles.
+          </p>
         </Section>
       </div>
 

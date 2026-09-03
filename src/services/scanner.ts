@@ -3,9 +3,10 @@
  * Traverses Premiumize folder hierarchy, classifies items as movies or TV shows,
  * and enriches them with TMDB metadata.
  */
-import type { Movie, TVShow, Season, Episode, MediaFile, SubtitleTrack, PMItem, ScanFolderSelection } from '../types'
+import type { Movie, TVShow, Season, Episode, MediaFile, SubtitleTrack, PMItem, ScanFolderSelection, MetadataCacheEntry, TMDBSeasonDetail } from '../types'
 import { listFolder, MOVIE_FOLDER_NAMES, SERIES_FOLDER_NAMES } from './premiumize'
 import { bestLogoPath, bestTrailerKey, movieDetail as tmdbMovieDetail, tvDetail as tmdbTVDetail } from './tmdb'
+import { getCachedMeta, putCachedMeta } from '../db'
 import {
   isTMDB,
   searchMovieBest,
@@ -539,7 +540,14 @@ async function fetchAllMetadata(
 }
 
 export async function fetchMovieMeta(movie: Movie): Promise<void> {
+  const cacheKey = metaCacheKey('movie', movie.title, movie.year, movie.tmdbId)
   try {
+    const cached = await getCachedMeta(cacheKey)
+    if (cached) {
+      applyMovieCache(movie, cached)
+      return
+    }
+
     let detail = null
     if (isTMDB() && movie.tmdbId) {
       detail = await tmdbMovieDetail(movie.tmdbId)
@@ -559,13 +567,45 @@ export async function fetchMovieMeta(movie: Movie): Promise<void> {
 
     if (videos.status === 'fulfilled') movie.trailerKey = bestTrailerKey(videos.value)
     if (images.status === 'fulfilled') movie.logoPath = bestLogoPath(images.value.logos ?? [])
+
+    // Persist for future rescans
+    await putCachedMeta({
+      key: cacheKey,
+      tmdbId: movie.tmdbId,
+      imdbId: movie.imdbId,
+      detail,
+      trailerKey: movie.trailerKey,
+      logoPath: movie.logoPath,
+      cachedAt: Date.now(),
+    })
   } catch {
     // No metadata found
   }
 }
 
+function metaCacheKey(kind: 'movie' | 'show', title: string, year?: string, tmdbId?: number): string {
+  const t = title.toLowerCase().trim()
+  return tmdbId ? `${kind}:id:${tmdbId}` : `${kind}:${t}|${year ?? ''}`
+}
+
+function applyMovieCache(movie: Movie, cached: MetadataCacheEntry): void {
+  if (isTMDB() && cached.tmdbId) movie.tmdbId = cached.tmdbId
+  if (cached.imdbId) movie.imdbId = cached.imdbId
+  if (cached.detail) movie.tmdbDetail = cached.detail
+  if (cached.trailerKey) movie.trailerKey = cached.trailerKey
+  if (cached.logoPath) movie.logoPath = cached.logoPath
+}
+
 export async function fetchShowMeta(show: TVShow, shows: Map<string, TVShow>): Promise<void> {
+  const cacheKey = metaCacheKey('show', show.title, show.year, show.tmdbId)
   try {
+    const cached = await getCachedMeta(cacheKey)
+    if (cached) {
+      applyShowCache(show, cached)
+      shows.set(show.title.toLowerCase(), show)
+      return
+    }
+
     let detail = null
     if (isTMDB() && show.tmdbId) {
       detail = await tmdbTVDetail(show.tmdbId)
@@ -587,6 +627,7 @@ export async function fetchShowMeta(show: TVShow, shows: Map<string, TVShow>): P
     if (images.status === 'fulfilled') show.logoPath = bestLogoPath(images.value.logos ?? [])
 
     // Fetch season details
+    const seasonsDetail: Record<string, TMDBSeasonDetail> = {}
     if (detail.seasons) {
       for (const tmdbSeason of detail.seasons) {
         const sIdx = show.seasons.findIndex((s) => s.number === tmdbSeason.season_number)
@@ -594,6 +635,7 @@ export async function fetchShowMeta(show: TVShow, shows: Map<string, TVShow>): P
         show.seasons[sIdx].tmdbSeason = tmdbSeason
         try {
           const sd = await metaSeasonDetail(detail, tmdbSeason.season_number)
+          seasonsDetail[String(tmdbSeason.season_number)] = sd
           if (sd.episodes) {
             for (const ep of sd.episodes) {
               const eIdx = show.seasons[sIdx].episodes.findIndex((e) => e.number === ep.episode_number)
@@ -606,9 +648,42 @@ export async function fetchShowMeta(show: TVShow, shows: Map<string, TVShow>): P
       }
     }
 
+    // Persist for future rescans
+    await putCachedMeta({
+      key: cacheKey,
+      tmdbId: show.tmdbId,
+      imdbId: show.imdbId,
+      detail,
+      trailerKey: show.trailerKey,
+      logoPath: show.logoPath,
+      seasons: seasonsDetail,
+      cachedAt: Date.now(),
+    })
+
     // Update the map
     shows.set(show.title.toLowerCase(), show)
   } catch {
     // No metadata found
+  }
+}
+
+function applyShowCache(show: TVShow, cached: MetadataCacheEntry): void {
+  if (isTMDB() && cached.tmdbId) show.tmdbId = cached.tmdbId
+  if (cached.imdbId) show.imdbId = cached.imdbId
+  if (cached.detail) show.tmdbDetail = cached.detail
+  if (cached.trailerKey) show.trailerKey = cached.trailerKey
+  if (cached.logoPath) show.logoPath = cached.logoPath
+  if (cached.detail?.seasons) {
+    for (const season of show.seasons) {
+      const summary = cached.detail.seasons.find((s) => s.season_number === season.number)
+      if (summary) season.tmdbSeason = summary
+      const sd: TMDBSeasonDetail | undefined = cached.seasons?.[String(season.number)]
+      if (sd?.episodes) {
+        for (const ep of season.episodes) {
+          const tmdbEp = sd.episodes.find((e) => e.episode_number === ep.number)
+          if (tmdbEp) ep.tmdbEpisode = tmdbEp
+        }
+      }
+    }
   }
 }

@@ -328,6 +328,18 @@ export interface ScanFolderSelection {
 
 export type MediaType = 'movie' | 'show'
 
+// Cached TMDB metadata so rescans don't refetch everything
+export interface MetadataCacheEntry {
+  key: string
+  tmdbId?: number
+  imdbId?: string
+  detail?: TMDBMovieDetail
+  trailerKey?: string
+  logoPath?: string
+  seasons?: Record<string, TMDBSeasonDetail>
+  cachedAt: number
+}
+
 // Computed helpers
 export function movieDisplayTitle(m: Movie): string {
   return m.tmdbDetail?.title ?? m.tmdbDetail?.name ?? m.title
