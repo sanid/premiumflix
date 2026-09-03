@@ -1,7 +1,6 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
-import { useCollection } from '../hooks/useCollection'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import { useI18n } from '../contexts/I18nContext'
 import { MovieRow, ShowRow, ContinueWatchingRow } from '../components/MediaRow'
@@ -10,11 +9,18 @@ import { movieDisplayTitle, showDisplayTitle, movieMainFile } from '../types'
 import type { Movie, TVShow } from '../types'
 
 export function Home() {
-  const { movies, tvShows, isLoading, scanProgress, hasLibrary, scan } = useLibrary()
-  const { favoriteIds, watchlistIds } = useCollection()
+  const { movies, tvShows, isLoading, scanProgress, hasLibrary, scan, favoriteIds, watchlistIds } = useLibrary()
   const { inProgress, getProgressFraction, removeProgress, isFinished } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
+
+  // First-time user without an API key — send them to setup (in an effect, never during render)
+  useEffect(() => {
+    if (!hasLibrary && !isLoading) {
+      const hasPmKey = !!(localStorage.getItem('pm_api_key') || import.meta.env.VITE_PM_API_KEY)
+      if (!hasPmKey) navigate('/setup', { replace: true })
+    }
+  }, [hasLibrary, isLoading, navigate])
 
   // Pick a random featured item (prefer high-rated with backdrop)
   const featured = useMemo(() => {
@@ -162,13 +168,6 @@ export function Home() {
   }
 
   if (!hasLibrary && !isLoading) {
-    // No API key configured at all — first-time user
-    const hasPmKey = !!(localStorage.getItem('pm_api_key') || import.meta.env.VITE_PM_API_KEY)
-    if (!hasPmKey) {
-      navigate('/setup', { replace: true })
-      return null
-    }
-
     return (
       <div className="min-h-screen bg-premiumflix-dark flex flex-col items-center justify-center gap-6 px-4 text-center">
         <div className="text-premiumflix-red font-black text-5xl">PREMIUMFLIX</div>

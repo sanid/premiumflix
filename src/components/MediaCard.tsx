@@ -12,6 +12,7 @@ interface MovieCardProps {
 
 interface ShowCardProps {
   show: TVShow
+  isWatched?: boolean
   onPlay?: () => void
 }
 
@@ -97,7 +98,7 @@ export function MovieCard({ movie, progressFraction, isWatched, onPlay }: MovieC
   )
 }
 
-export function ShowCard({ show, onPlay }: ShowCardProps) {
+export function ShowCard({ show, isWatched, onPlay }: ShowCardProps) {
   const navigate = useNavigate()
   const [imgError, setImgError] = useState(false)
   const poster = showPosterUrl(show)
@@ -147,6 +148,15 @@ export function ShowCard({ show, onPlay }: ShowCardProps) {
               <PlayIcon className="w-5 h-5 text-white" />
             </div>
           </button>
+        )}
+
+        {/* Watched checkmark */}
+        {isWatched && (
+          <div className="absolute top-2 right-2 bg-black/60 rounded-full w-6 h-6 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
         )}
       </div>
 

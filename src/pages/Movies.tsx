@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
-import { useCollection } from '../hooks/useCollection'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import { MovieCard } from '../components/MediaCard'
 import { movieDisplayTitle, movieMainFile } from '../types'
@@ -12,8 +11,7 @@ type SortKey = 'title' | 'year' | 'rating' | 'added'
 type FilterKey = 'all' | 'favorites' | 'watchlist'
 
 export function Movies() {
-  const { movies } = useLibrary()
-  const { favoriteIds, watchlistIds } = useCollection()
+  const { movies, favoriteIds, watchlistIds } = useLibrary()
   const { isFinished } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()

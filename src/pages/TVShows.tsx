@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
-import { useCollection } from '../hooks/useCollection'
+import { useWatchProgress } from '../hooks/useWatchProgress'
 import { ShowCard } from '../components/MediaCard'
 import { showDisplayTitle } from '../types'
 import { useI18n } from '../contexts/I18nContext'
@@ -10,8 +10,8 @@ type SortKey = 'title' | 'year' | 'rating' | 'seasons'
 type FilterKey = 'all' | 'favorites' | 'watchlist'
 
 export function TVShows() {
-  const { tvShows } = useLibrary()
-  const { favoriteIds, watchlistIds } = useCollection()
+  const { tvShows, favoriteIds, watchlistIds } = useLibrary()
+  const { isFinished } = useWatchProgress()
   const { t } = useI18n()
 
   const [sort, setSort] = useState<SortKey>('title')
@@ -136,7 +136,14 @@ export function TVShows() {
           style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}
         >
           {filtered.map((show) => (
-            <ShowCard key={show.id} show={show} />
+            <ShowCard
+              key={show.id}
+              show={show}
+              isWatched={
+                show.seasons.length > 0 &&
+                show.seasons.every((s) => s.episodes.length > 0 && s.episodes.every((e) => isFinished(e.file.id)))
+              }
+            />
           ))}
         </div>
       )}

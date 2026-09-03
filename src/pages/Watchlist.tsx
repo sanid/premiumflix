@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react'
 import { useLibrary } from '../contexts/LibraryContext'
-import { useCollection } from '../hooks/useCollection'
 import { MovieCard, ShowCard } from '../components/MediaCard'
 import { useI18n } from '../contexts/I18nContext'
 import { movieDisplayTitle, showDisplayTitle } from '../types'
@@ -9,8 +8,7 @@ type SortKey = 'title' | 'year' | 'rating' | 'added'
 type FilterKey = 'all' | 'watchlist' | 'favorites'
 
 export function Watchlist() {
-  const { movies, tvShows } = useLibrary()
-  const { watchlistIds, favoriteIds } = useCollection()
+  const { movies, tvShows, favoriteIds, watchlistIds } = useLibrary()
   const { t } = useI18n()
 
   const [sort, setSort] = useState<SortKey>('added')

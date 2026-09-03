@@ -44,19 +44,20 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const [initialized, setInitialized] = useState(false)
   const scanningRef = useRef(false)
 
-  const [notifications, setNotifications] = useState<string[]>([])
+  const [notifications, setNotifications] = useState<{ id: number; text: string }[]>([])
+  const nextNotificationId = useRef(0)
   const [pendingTransfers, setPendingTransfers] = useState<{ id: string; name: string; tmdbId?: number; type?: 'movie' | 'show'; season?: number; episode?: number }[]>([])
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
   const [watchlistIds, setWatchlistIds] = useState<Set<string>>(new Set())
 
-  // Auto-dismiss notifications after 8s
-  useEffect(() => {
-    if (notifications.length === 0) return
-    const timer = setTimeout(() => {
-      setNotifications(prev => prev.length <= 3 ? [] : prev.slice(3))
+  const addNotification = useCallback((text: string) => {
+    const id = nextNotificationId.current++
+    setNotifications(prev => [...prev, { id, text }])
+    // Each notification dismisses itself after 8s
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id))
     }, 8000)
-    return () => clearTimeout(timer)
-  }, [notifications])
+  }, [])
 
   // Load from IndexedDB and localStorage on mount
   useEffect(() => {
@@ -99,7 +100,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
           const status = t.status?.toLowerCase() ?? ''
           if (status === 'success' || status === 'finished' || status === 'seeding') {
             completed.push(pt.id)
-            setNotifications(prev => [...prev, `✅ Download finished: ${pt.name}. You can now rescan your library!`])
+            addNotification(`✅ Download finished: ${pt.name}. You can now rescan your library!`)
             
             // If we have metadata hints, store them for the scanner
             if (pt.tmdbId && pt.type) {
@@ -112,7 +113,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
             }
           } else if (status === 'error' || status === 'failed') {
             completed.push(pt.id)
-            setNotifications(prev => [...prev, `❌ Download failed: ${pt.name}`])
+            addNotification(`❌ Download failed: ${pt.name}`)
           }
         }
         
@@ -167,7 +168,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       if (prev.some(p => p.id === transferId)) return prev
       const next = [...prev, { id: transferId, name, ...metadata }]
       localStorage.setItem('pending_transfers', JSON.stringify(next))
-      setNotifications(prev => [...prev, `⬇️ Download started: ${name}`])
+      addNotification(`⬇️ Download started: ${name}`)
       return next
     })
   }, [])
@@ -257,7 +258,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     try {
       const cloudLib = await loadLibraryFromCloud()
       if (!cloudLib) {
-        setNotifications(prev => [...prev, '📭 No cloud backup found on Premiumize.'])
+        addNotification('📭 No cloud backup found on Premiumize.')
         return false
       }
       
@@ -265,11 +266,11 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       setTVShows(cloudLib.tvShows)
       await saveLibrary(cloudLib.movies, cloudLib.tvShows)
       
-      setNotifications(prev => [...prev, '☁️ Library restored from cloud!'])
+      addNotification('☁️ Library restored from cloud!')
       return true
     } catch (e) {
       console.error(e)
-      setNotifications(prev => [...prev, '❌ Failed to restore from cloud.'])
+      addNotification('❌ Failed to restore from cloud.')
       return false
     } finally {
       setIsLoading(false)
@@ -326,7 +327,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
         updateMovieInLibrary,
         updateShowInLibrary,
         monitorTransfer,
-        notifications,
+        notifications: notifications.map(n => n.text),
         dismissNotification,
         restoreFromCloud,
         favoriteIds,
@@ -342,8 +343,8 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       {notifications.length > 0 && (
         <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full">
           {notifications.map((note, i) => (
-            <div key={i} className="bg-premiumflix-surface border border-white/20 shadow-2xl rounded p-4 flex justify-between items-start gap-3">
-              <p className="text-white text-sm font-medium">{note}</p>
+            <div key={note.id} className="bg-premiumflix-surface border border-white/20 shadow-2xl rounded p-4 flex justify-between items-start gap-3">
+              <p className="text-white text-sm font-medium">{note.text}</p>
               <button onClick={() => dismissNotification(i)} className="text-white/50 hover:text-white">✕</button>
             </div>
           ))}

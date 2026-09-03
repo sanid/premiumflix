@@ -143,8 +143,9 @@ export function Navbar() {
                   </button>
                 </div>
               ) : (
-                <button onClick={() => setSearchOpen(true)} className="text-premiumflix-muted hover:text-white transition-colors p-1">
+                <button onClick={() => setSearchOpen(true)} className="text-premiumflix-muted hover:text-white transition-colors p-1 flex items-center gap-1" title="Search (press /)">
                   <SearchIcon />
+                  <kbd className="hidden lg:inline-block border border-white/20 rounded px-1 text-[10px] leading-4 text-premiumflix-muted">/</kbd>
                 </button>
               )}
 
