@@ -205,6 +205,8 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false)
       setScanProgress(null)
       scanningRef.current = false
+      // Manual scans count as fresh — delay the next auto-rescan
+      localStorage.setItem('last_auto_rescan_at', String(Date.now()))
     }
   }, [])
 
@@ -214,6 +216,47 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     setTVShows([])
     await scan(customRoots)
   }, [scan])
+
+  // ─── Scheduled auto-rescan ───────────────────────────────────────────────
+  // Opt-in (Settings): while a tab is open, periodically rescan and toast
+  // a summary of what's new. Runs at most every 5 minutes of checking.
+
+  const runAutoRescan = useCallback(async () => {
+    if (scanningRef.current) return
+    if (document.visibilityState !== 'visible') return
+    const before = await loadLibrary()
+    await scan()
+    const after = await loadLibrary()
+
+    const beforeMovieIds = new Set(before.movies.map(m => m.id))
+    const beforeShowIds = new Set(before.tvShows.map(s => s.id))
+    const countEps = (lib: { tvShows: TVShow[] }) =>
+      lib.tvShows.reduce((n, s) => n + s.seasons.reduce((k, se) => k + se.episodes.length, 0), 0)
+
+    const newMovies = after.movies.filter(m => !beforeMovieIds.has(m.id)).length
+    const newShows = after.tvShows.filter(s => !beforeShowIds.has(s.id)).length
+    const newEpisodes = countEps(after) - countEps(before)
+
+    const parts: string[] = []
+    if (newMovies) parts.push(`${newMovies} new movie${newMovies > 1 ? 's' : ''}`)
+    if (newShows) parts.push(`${newShows} new show${newShows > 1 ? 's' : ''}`)
+    if (newEpisodes > 0) parts.push(`${newEpisodes} new episode${newEpisodes !== 1 ? 's' : ''}`)
+    if (parts.length) addNotification(`🆕 Library update: ${parts.join(', ')}`)
+  }, [scan, addNotification])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      try {
+        const hours = parseFloat(localStorage.getItem('auto_rescan_hours') ?? '0')
+        if (!hours || hours <= 0) return
+        const last = parseFloat(localStorage.getItem('last_auto_rescan_at') ?? '0')
+        if (Date.now() - last < hours * 3_600_000) return
+        localStorage.setItem('last_auto_rescan_at', String(Date.now()))
+        runAutoRescan().catch(() => { /* non-fatal */ })
+      } catch { /* ignore */ }
+    }, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [runAutoRescan])
 
   const appendMovieToLibrary = useCallback((movie: Movie) => {
     setMovies(prev => {
