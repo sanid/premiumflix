@@ -247,7 +247,7 @@ export function Navbar() {
                       notifications.map((note, i) => (
                         <div key={note.id} className="flex items-start gap-2.5 px-4 py-3 hover:bg-white/5 border-b border-white/5 last:border-0">
                           <NotificationIcon kind={note.kind} className="w-4 h-4 mt-0.5" />
-                          <p className="text-white text-sm flex-1">{note.text}</p>
+                          <p className="text-white text-sm flex-1 min-w-0 break-words [overflow-wrap:anywhere]">{note.text}</p>
                           <button onClick={() => dismissNotification(i)} className="text-white/40 hover:text-white flex-shrink-0 mt-0.5">
                             <XIcon className="w-3.5 h-3.5" />
                           </button>
