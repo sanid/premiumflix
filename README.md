@@ -77,6 +77,27 @@ A sleek streaming frontend that connects directly to your Premiumize.me cloud st
 - **Backups**: Library, favorites, watchlist and watch progress auto-sync to your Premiumize cloud — plus full JSON export/import in Settings.
 - **Multilingual**: Supports English and German.
 
+## Desktop app
+
+Premiumflix also ships as a native desktop build (Tauri v2) for macOS, Windows
+and Linux. Grab a binary from the [releases page](https://github.com/sanid/premiumflix/releases),
+or build it yourself:
+
+```bash
+npm run desktop:build
+```
+
+The builds are unsigned, so the first launch needs a nudge: on macOS right-click
+the app and choose **Open** (or run `xattr -cr /Applications/Premiumflix.app`),
+and on Windows pick **More info → Run anyway** in SmartScreen.
+
+Two differences from the web version, both because there is no server to proxy
+through: the desktop app talks to TMDB directly with the key you enter in
+Settings (the `VITE_TMDB_USE_PROXY` flag is ignored), and the Usenet indexer key
+gets its own field in Settings. Everything else behaves identically — requests
+that a browser would block for CORS or mixed-content reasons are made from Rust
+instead, limited to an allow-list of hosts in `src-tauri/capabilities/`.
+
 ## Tech Stack
 
 - React 18 + TypeScript
@@ -85,6 +106,7 @@ A sleek streaming frontend that connects directly to your Premiumize.me cloud st
 - Dexie.js (IndexedDB)
 - Hls.js
 - Vercel Serverless Functions (API proxy)
+- Tauri v2 + Rust (desktop builds)
 
 ## Running Locally
 
@@ -120,4 +142,8 @@ Everything works with keys entered in Settings, so no environment variables are 
 | `VITE_TMDB_USE_PROXY` | Build | Set to `true` to route TMDB calls through the serverless proxy. |
 | `VITE_TRAKT_CLIENT_ID` | Build | Pre-fills the Trakt client ID for device-code auth. |
 
-> `VITE_*` variables are baked into the client bundle at build time and are visible to anyone using the app — only use them on a deployment you keep private.
+> `VITE_*` variables are baked into the client bundle at build time and are visible to anyone using the app — only use them on a deployment you keep private. To keep your TMDB key off the client, set `TMDB_API_KEY` (server) plus `VITE_TMDB_USE_PROXY=true` instead of `VITE_TMDB_API_KEY`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
