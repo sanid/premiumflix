@@ -7,6 +7,8 @@ import { AlertTriangleIcon, XIcon } from './icons'
 
 interface VideoPlayerProps {
   src: string
+  /** Storyboard VTT manifest for seek-bar hover previews. */
+  storyboardUrl?: string
   title: string
   subtitle?: string
   subtitles?: SubtitleTrack[]
@@ -22,6 +24,7 @@ interface VideoPlayerProps {
 
 export function VideoPlayer({
   src,
+  storyboardUrl,
   title,
   subtitle,
   subtitles,
@@ -126,6 +129,12 @@ export function VideoPlayer({
   const [hoverX, setHoverX] = useState(0)
   const [hoverImgUrl, setHoverImgUrl] = useState<string | null>(null)
   const [hoverCrop, setHoverCrop] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  // The CDN renders each storyboard frame on demand, so a thumbnail can take a
+  // second to arrive. Swapping <img src> straight away would blank the preview
+  // while it loads; instead keep the last decoded frame up until the next one
+  // is ready. `loadedThumbs` remembers what the browser cache already holds.
+  const loadedThumbs = useRef<Set<string>>(new Set())
+  const wantedThumb = useRef<string | null>(null)
 
   // ─── PiP / Cast / AirPlay ────────────────────────────────────────────────
   const [pipSupported, setPipSupported] = useState(false)
@@ -265,47 +274,33 @@ export function VideoPlayer({
 
   // ─── Storyboard thumbnails fetch ─────────────────────────────────────────
   //
-  // CDN77 provides hover thumbnail storyboards for live-transcoded streams.
-  // The manifest is a WebVTT file where each cue contains an image URL (sprite sheet)
-  // with #xywh= crop coordinates.
+  // CDN77 serves a WebVTT manifest whose cues each carry an image URL plus
+  // #xywh= crop coordinates. The URL is built by the caller from the file's raw
+  // download link, so previews work for direct-play files as well as transcodes.
 
   useEffect(() => {
     setThumbnails([])
-    if (!src) return
-
-    let storyboardUrl: string | null = null
-    try {
-      if (src.includes('/vod/') && src.startsWith('http')) {
-        const idx = src.indexOf('/vod/') + 5
-        const directPart = src.substring(idx)
-        const urlObj = new URL(src)
-        const base = `${urlObj.origin}/storyboards/manifest`
-        const params = new URLSearchParams({
-          url: directPart,
-          interval: '15',
-          width: '160',
-          height: '90',
-        })
-        storyboardUrl = `${base}?${params.toString()}`
-      }
-    } catch { /* not a valid URL */ }
+    setHoverImgUrl(null)
+    setHoverCrop(null)
+    loadedThumbs.current = new Set()
+    wantedThumb.current = null
     if (!storyboardUrl) return
 
     let cancelled = false
     fetch(storyboardUrl)
-      .then((r) => (r.ok ? r.text() : Promise.reject(`HTTP ${r.status}`)))
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((vtt) => {
         if (cancelled) return
-        const thumbs = parseStoryboardVtt(vtt, storyboardUrl!)
+        const thumbs = parseStoryboardVtt(vtt, storyboardUrl)
         if (thumbs.length > 0) {
-          debugLog('[Player Loaded storyboard:', thumbs.length, 'thumbnails')
+          debugLog('[Player] Loaded storyboard:', thumbs.length, 'thumbnails')
           setThumbnails(thumbs)
         }
       })
-      .catch(() => {})
+      .catch((err) => debugLog('[Player] Storyboard unavailable:', err))
 
     return () => { cancelled = true }
-  }, [src])
+  }, [storyboardUrl])
 
   // ─── PiP / AirPlay support check ──────────────────────────────────────────
 
@@ -775,9 +770,32 @@ export function VideoPlayer({
         if (t.time <= time) best = t
         else break
       }
-      setHoverImgUrl(best.url)
-      setHoverCrop({ x: best.x, y: best.y, w: best.w, h: best.h })
+      showThumbnail(best)
     }
+  }
+
+  function showThumbnail(cue: ThumbCue) {
+    // Guard on what is *displayed*, not on what was last requested: a request
+    // that never resolved must not wedge this cue into an unloadable state.
+    if (hoverImgUrl === cue.url) return
+    wantedThumb.current = cue.url
+
+    const crop = { x: cue.x, y: cue.y, w: cue.w, h: cue.h }
+    if (loadedThumbs.current.has(cue.url)) {
+      setHoverImgUrl(cue.url)
+      setHoverCrop(crop)
+      return
+    }
+
+    const img = new Image()
+    img.onload = () => {
+      loadedThumbs.current.add(cue.url)
+      // A later hover may have moved on while this was in flight
+      if (wantedThumb.current !== cue.url) return
+      setHoverImgUrl(cue.url)
+      setHoverCrop(crop)
+    }
+    img.src = cue.url
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────

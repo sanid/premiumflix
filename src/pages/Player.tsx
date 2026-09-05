@@ -25,6 +25,23 @@ function liveTranscodeUrl(directLink: string): string {
   return `https://cdn77-livetranscode2.energycdn.com/vod/${directLink}/index.m3u8`
 }
 
+/**
+ * Storyboard manifest for the seek-bar scrubbing preview.
+ *
+ * The endpoint lives on the live-transcode host but takes the raw download
+ * link as a parameter, so it works for every file — including the ones that
+ * play straight from `stream_link` and never touch /vod/.
+ */
+function storyboardManifestUrl(directLink: string): string {
+  const params = new URLSearchParams({
+    url: directLink,
+    interval: '15',
+    width: '160',
+    height: '90',
+  })
+  return `https://cdn77-livetranscode2.energycdn.com/storyboards/manifest?${params.toString()}`
+}
+
 export function Player() {
   const { mode, mediaId, fileId } = useParams<{
     mode: PlayMode
@@ -43,6 +60,7 @@ export function Player() {
   }, [])
 
   const [playUrl, setPlayUrl] = useState<string | null>(null)
+  const [storyboardUrl, setStoryboardUrl] = useState<string | undefined>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [file, setFile] = useState<MediaFile | null>(null)
@@ -128,6 +146,9 @@ export function Player() {
           link: d.link ? '✓ ' + d.link.substring(0, 60) + '...' : '✗ null',
           transcode_status: d.transcode_status,
         })
+
+        // Scrubbing thumbnails come from the raw link, not the playback URL
+        setStoryboardUrl(d.link ? storyboardManifestUrl(d.link) : undefined)
 
         // Best case: stream_link already available (cached transcode)
         if (d.stream_link) {
@@ -323,6 +344,7 @@ export function Player() {
     <div className="fixed inset-0 bg-black">
       <VideoPlayer
         src={playUrl}
+        storyboardUrl={storyboardUrl}
         title={title}
         subtitle={subtitle}
         subtitles={file?.subtitles}
