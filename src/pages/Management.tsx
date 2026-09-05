@@ -15,8 +15,36 @@ import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl, for
 import type { Movie, TVShow, TMDBMovie, WatchProgress } from '../types'
 
 type Tab = 'movies' | 'shows'
-type Filter = 'all' | 'unwatched' | 'cloudRemoved'
+type Filter = 'all' | 'unwatched' | 'cloudRemoved' | 'duplicates'
 type ConfirmAction = { type: 'lib' | 'cloud' | 'both' | 'cloudOnly'; ids: string[]; mediaType: Tab } | null
+
+function normalizeTitle(t: string): string {
+  return t.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+// Identity used for duplicate detection: TMDB id when known, else title+year
+function dupKey(item: Movie | TVShow): string {
+  const kind = 'files' in item ? 'm' : 's'
+  const id = item.tmdbId ?? item.tmdbDetail?.id
+  if (id) return `${kind}${id}`
+  const title = 'files' in item ? movieDisplayTitle(item as Movie) : showDisplayTitle(item as TVShow)
+  return `${kind}:${normalizeTitle(title)}|${item.year ?? ''}`
+}
+
+function itemSize(item: Movie | TVShow): number {
+  if ('files' in item) return (item as Movie).files.reduce((s, f) => s + (f.size || 0), 0)
+  return (item as TVShow).seasons.reduce((s, se) => s + se.episodes.reduce((n, ep) => n + (ep.file.size || 0), 0), 0)
+}
+
+// Within a duplicate group, the copy worth keeping: has metadata > larger > newer
+function keeperOf(group: (Movie | TVShow)[]): Movie | TVShow {
+  return [...group].sort((a, b) => {
+    const metaA = a.tmdbDetail ? 1 : 0
+    const metaB = b.tmdbDetail ? 1 : 0
+    if (metaA !== metaB) return metaB - metaA
+    return itemSize(b) - itemSize(a) || ((b as Movie).addedAt ?? 0) - ((a as Movie).addedAt ?? 0)
+  })[0]
+}
 
 export function Management() {
   const { movies, tvShows, removeMovieFromLibrary, removeShowFromLibrary, updateMovieInLibrary, updateShowInLibrary, monitorTransfer } = useLibrary()
@@ -51,6 +79,26 @@ export function Management() {
     )
   }
 
+  // Duplicate detection: group by TMDB id (or title+year), extras = all but the keeper
+  const { duplicateExtras, duplicateGroupCount } = useMemo(() => {
+    const base = tab === 'movies' ? movies : tvShows
+    const groups = new Map<string, (Movie | TVShow)[]>()
+    for (const it of base) {
+      const k = dupKey(it)
+      if (!groups.has(k)) groups.set(k, [])
+      groups.get(k)!.push(it)
+    }
+    const extras = new Set<string>()
+    let groupCount = 0
+    for (const g of groups.values()) {
+      if (g.length < 2) continue
+      groupCount++
+      const keeper = keeperOf(g)
+      for (const it of g) if (it.id !== keeper.id) extras.add(it.id)
+    }
+    return { duplicateExtras: extras, duplicateGroupCount: groupCount }
+  }, [tab, movies, tvShows])
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     const base = tab === 'movies' ? movies : tvShows
@@ -62,8 +110,12 @@ export function Management() {
     })
     if (filter === 'unwatched') items = items.filter(i => isNeverWatched(i))
     if (filter === 'cloudRemoved') items = items.filter(i => !!(i as Movie | TVShow).cloudRemoved)
+    if (filter === 'duplicates') {
+      items = items.filter(i => duplicateExtras.has(i.id)).sort((a, b) => dupKey(a).localeCompare(dupKey(b)))
+    }
     return items
-  }, [tab, search, filter, movies, tvShows, watchedFileIds])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, search, filter, movies, tvShows, watchedFileIds, duplicateExtras])
 
   // Toggle selection
   function toggleSelect(id: string) {
@@ -216,6 +268,12 @@ export function Management() {
             <button onClick={selectNone} className="text-premiumflix-muted text-xs font-bold hover:underline">Deselect</button>
             <span className="text-white/10">|</span>
             <button
+              onClick={() => setConfirmAction({ type: 'lib', ids: [...selected], mediaType: tab })}
+              className="bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+            >
+              📚 Remove from library (keep files)
+            </button>
+            <button
               onClick={() => setConfirmAction({ type: 'cloudOnly', ids: [...selected], mediaType: tab })}
               className="bg-amber-700/80 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
             >
@@ -238,9 +296,17 @@ export function Management() {
 
         {/* Select mode with 0 selected */}
         {selectMode && selected.size === 0 && (
-          <div className="mb-4 bg-premiumflix-surface border border-white/10 rounded-xl px-5 py-3 flex items-center gap-3 text-premiumflix-muted text-sm animate-fade-in">
+          <div className="mb-4 bg-premiumflix-surface border border-white/10 rounded-xl px-5 py-3 flex items-center gap-3 text-premiumflix-muted text-sm animate-fade-in flex-wrap">
             <span>Click items to select them</span>
             <button onClick={selectAll} className="text-blue-400 text-xs font-bold hover:underline">Select all on this page</button>
+            {duplicateExtras.size > 0 && (
+              <button
+                onClick={() => setSelected(new Set(duplicateExtras))}
+                className="text-amber-400 text-xs font-bold hover:underline"
+              >
+                Select {duplicateExtras.size} duplicate{duplicateExtras.size !== 1 ? 's' : ''} (best copy kept)
+              </button>
+            )}
           </div>
         )}
 
@@ -267,6 +333,7 @@ export function Management() {
             { key: 'all' as Filter, label: 'All', count: tab === 'movies' ? movies.length : tvShows.length },
             { key: 'unwatched' as Filter, label: 'Never watched', count: unwatchedCount },
             { key: 'cloudRemoved' as Filter, label: 'Removed from cloud', count: cloudRemovedCount },
+            { key: 'duplicates' as Filter, label: `Duplicates (${duplicateGroupCount})`, count: duplicateExtras.size },
           ]).map(f => (
             <button
               key={f.key}
@@ -338,6 +405,9 @@ export function Management() {
                       {year && <span className="text-premiumflix-muted text-xs">{year}</span>}
                       {neverWatched && !isCloudRemoved && (
                         <span className="text-[10px] bg-slate-700/60 text-slate-300 px-1.5 py-0.5 rounded font-medium">Never watched</span>
+                      )}
+                      {filter === 'duplicates' && duplicateExtras.has(id) && (
+                        <span className="text-[10px] bg-red-800/60 text-red-300 px-1.5 py-0.5 rounded font-medium">Duplicate</span>
                       )}
                       {!hasMeta && <span className="text-xs bg-yellow-800/60 text-yellow-300 px-1.5 py-0.5 rounded">No metadata</span>}
                       {!hasPoster && hasMeta && <span className="text-xs bg-orange-800/60 text-orange-300 px-1.5 py-0.5 rounded">No poster</span>}
@@ -437,7 +507,7 @@ export function Management() {
         {items.length === 0 && (
           <div className="text-center py-24 text-premiumflix-muted">
             <p className="text-4xl mb-3">📭</p>
-            <p>{search ? `No results for "${search}"` : filter === 'unwatched' ? 'Everything has been watched!' : filter === 'cloudRemoved' ? 'No cloud-removed items' : `No ${tab} in library`}</p>
+            <p>{search ? `No results for "${search}"` : filter === 'unwatched' ? 'Everything has been watched!' : filter === 'cloudRemoved' ? 'No cloud-removed items' : filter === 'duplicates' ? 'No duplicates found — your library is clean!' : `No ${tab} in library`}</p>
           </div>
         )}
       </div>
