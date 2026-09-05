@@ -5,6 +5,7 @@ import { useWatchProgress } from '../hooks/useWatchProgress'
 import { useI18n } from '../contexts/I18nContext'
 import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl, hasProgress } from '../types'
 import type { Movie, TVShow } from '../types'
+import { BarChartIcon } from '../components/icons'
 
 export function Stats() {
   const { movies, tvShows } = useLibrary()
@@ -122,7 +123,7 @@ export function Stats() {
 
         {!hasData ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="text-6xl opacity-20 mb-4">📊</div>
+            <BarChartIcon className="w-16 h-16 text-white/20 mb-4" strokeWidth={1.5} />
             <p className="text-premiumflix-muted text-lg">{t.stats.noData}</p>
           </div>
         ) : (

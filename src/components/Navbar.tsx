@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useI18n } from '../contexts/I18nContext'
-import { useLibrary } from '../contexts/LibraryContext'
+import { useLibrary, NotificationIcon } from '../contexts/LibraryContext'
 import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl } from '../types'
+import { SearchIcon, ArrowRightIcon, XIcon, SettingsIcon, MenuIcon, BellIcon } from './icons'
 
 export function Navbar() {
   const { t } = useI18n()
@@ -139,12 +140,12 @@ export function Navbar() {
                     className="bg-black/80 border border-white/30 text-white text-sm px-3 py-1.5 rounded outline-none focus:border-white w-44 sm:w-64"
                   />
                   <button type="button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} className="ml-2 text-white/60 hover:text-white">
-                    <XIcon />
+                    <XIcon className="w-4 h-4" />
                   </button>
                 </div>
               ) : (
                 <button onClick={() => setSearchOpen(true)} className="text-premiumflix-muted hover:text-white transition-colors p-1 flex items-center gap-1" title="Search (press /)">
-                  <SearchIcon />
+                  <SearchIcon className="w-5 h-5" />
                   <kbd className="hidden lg:inline-block border border-white/20 rounded px-1 text-[10px] leading-4 text-premiumflix-muted">/</kbd>
                 </button>
               )}
@@ -193,7 +194,7 @@ export function Navbar() {
                           onClick={searchOnline}
                           className="w-full px-3 py-2.5 text-sm text-premiumflix-muted hover:text-white hover:bg-white/10 transition-colors text-left"
                         >
-                          🔍 Search online for "<span className="text-white">{searchQuery.trim()}</span>"
+                          <SearchIcon className="w-4 h-4 mr-1.5 -mt-px" /> Search online for "<span className="text-white">{searchQuery.trim()}</span>"
                         </button>
                       </div>
                     </div>
@@ -204,7 +205,7 @@ export function Navbar() {
                         onClick={searchOnline}
                         className="text-premiumflix-red text-sm font-bold hover:underline"
                       >
-                        🔍 Search TMDB & NZBs →
+                        <SearchIcon className="w-4 h-4 mr-1.5 -mt-px" /> Search TMDB &amp; NZBs <ArrowRightIcon className="w-4 h-4 ml-1 -mt-px" />
                       </button>
                     </div>
                   )}
@@ -218,7 +219,7 @@ export function Navbar() {
                 onClick={() => setNotifOpen(!notifOpen)}
                 className="relative text-premiumflix-muted hover:text-white transition-colors p-1"
               >
-                <BellIcon />
+                <BellIcon className="w-5 h-5" />
                 {notifications.length > 0 && (
                   <span className="absolute -top-0.5 -right-0.5 bg-premiumflix-red text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
                     {notifications.length > 9 ? '9+' : notifications.length}
@@ -244,9 +245,12 @@ export function Navbar() {
                       <p className="text-premiumflix-muted text-sm text-center py-6">No notifications</p>
                     ) : (
                       notifications.map((note, i) => (
-                        <div key={i} className="flex items-start gap-2 px-4 py-3 hover:bg-white/5 border-b border-white/5 last:border-0">
-                          <p className="text-white text-sm flex-1">{note}</p>
-                          <button onClick={() => dismissNotification(i)} className="text-white/40 hover:text-white text-xs flex-shrink-0 mt-0.5">✕</button>
+                        <div key={note.id} className="flex items-start gap-2.5 px-4 py-3 hover:bg-white/5 border-b border-white/5 last:border-0">
+                          <NotificationIcon kind={note.kind} className="w-4 h-4 mt-0.5" />
+                          <p className="text-white text-sm flex-1">{note.text}</p>
+                          <button onClick={() => dismissNotification(i)} className="text-white/40 hover:text-white flex-shrink-0 mt-0.5">
+                            <XIcon className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       ))
                     )}
@@ -257,7 +261,7 @@ export function Navbar() {
 
             {/* Settings */}
             <NavLink to="/settings" className="text-premiumflix-muted hover:text-white transition-colors p-1">
-              <SettingsIcon />
+              <SettingsIcon className="w-5 h-5" />
             </NavLink>
 
             {/* Mobile menu button */}
@@ -265,7 +269,7 @@ export function Navbar() {
               className="md:hidden text-white p-1"
               onClick={() => setMenuOpen(!menuOpen)}
             >
-              <MenuIcon />
+              <MenuIcon className="w-6 h-6" />
             </button>
           </div>
         </div>
@@ -301,43 +305,7 @@ export function Navbar() {
   )
 }
 
-function SearchIcon() {
-  return (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-  )
-}
 
-function XIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  )
-}
 
-function SettingsIcon() {
-  return (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  )
-}
 
-function MenuIcon() {
-  return (
-    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-    </svg>
-  )
-}
 
-function BellIcon() {
-  return (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-    </svg>
-  )
-}

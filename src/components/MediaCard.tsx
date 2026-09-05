@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Movie, TVShow } from '../types'
 import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl, showEpisodeCounts } from '../types'
+import { StarIcon } from './icons'
 
 interface MovieCardProps {
   movie: Movie
@@ -53,7 +54,7 @@ export function MovieCard({ movie, progressFraction, isWatched, onPlay }: MovieC
           <div className="flex items-center gap-2 mt-1">
             {year && <span className="text-premiumflix-muted text-xs">{year}</span>}
             {rating && rating > 0 && (
-              <span className="text-yellow-400 text-xs">★ {rating.toFixed(1)}</span>
+              <span className="text-yellow-400 text-xs inline-flex items-center gap-1"><StarIcon className="w-3 h-3" /> {rating.toFixed(1)}</span>
             )}
           </div>
         </div>
@@ -141,7 +142,7 @@ export function ShowCard({ show, isWatched, onPlay }: ShowCardProps) {
               </span>
             )}
             {rating && rating > 0 && (
-              <span className="text-yellow-400 text-xs">★ {rating.toFixed(1)}</span>
+              <span className="text-yellow-400 text-xs inline-flex items-center gap-1"><StarIcon className="w-3 h-3" /> {rating.toFixed(1)}</span>
             )}
           </div>
         </div>

@@ -13,9 +13,34 @@ import { bestLogoPath, bestTrailerKey } from '../services/tmdb'
 import { getAllProgress } from '../db'
 import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl, formatFileSize } from '../types'
 import type { Movie, TVShow, TMDBMovie, WatchProgress } from '../types'
+import {
+  FilmIcon, TvIcon, StarIcon, XIcon, SquareIcon, LibraryIcon, CloudOffIcon, CloudTrashIcon,
+  TrashIcon, InboxIcon, AlertTriangleIcon, PencilIcon, RefreshIcon, CheckCircleIcon,
+  XCircleIcon, CloudIcon, DownloadIcon,
+} from '../components/icons'
 
 type Tab = 'movies' | 'shows'
 type Filter = 'all' | 'unwatched' | 'cloudRemoved' | 'duplicates'
+type ActionStatus = { kind: 'ok' | 'error' | 'cloud' | 'download' | 'pending'; text: string }
+
+const STATUS_STYLES: Record<ActionStatus['kind'], { Icon: (p: { className?: string }) => JSX.Element; color: string }> = {
+  ok: { Icon: CheckCircleIcon, color: 'text-green-400' },
+  error: { Icon: XCircleIcon, color: 'text-red-400' },
+  cloud: { Icon: CloudIcon, color: 'text-amber-300' },
+  download: { Icon: DownloadIcon, color: 'text-blue-400' },
+  pending: { Icon: RefreshIcon, color: 'text-premiumflix-muted' },
+}
+
+function StatusLine({ status }: { status: ActionStatus }) {
+  const { Icon, color } = STATUS_STYLES[status.kind]
+  return (
+    <p className={`text-xs mt-1 flex items-center gap-1.5 ${color}`}>
+      <Icon className={`w-3.5 h-3.5 ${status.kind === 'pending' ? 'animate-spin' : ''}`} />
+      {status.text}
+    </p>
+  )
+}
+
 type ConfirmAction = { type: 'lib' | 'cloud' | 'both' | 'cloudOnly'; ids: string[]; mediaType: Tab } | null
 
 function normalizeTitle(t: string): string {
@@ -54,7 +79,7 @@ export function Management() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
-  const [actionStatus, setActionStatus] = useState<Record<string, string>>({})
+  const [actionStatus, setActionStatus] = useState<Record<string, ActionStatus>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
 
   // Multi-select
@@ -153,7 +178,7 @@ export function Management() {
     setConfirmAction(null)
 
     for (const item of items) {
-      setActionStatus(p => ({ ...p, [item.id]: 'Processing...' }))
+      setActionStatus(p => ({ ...p, [item.id]: { kind: 'pending', text: 'Processing…' } }))
     }
 
     for (const item of items) {
@@ -179,13 +204,13 @@ export function Management() {
         setActionStatus(p => ({
           ...p,
           [item.id]: action === 'cloudOnly'
-            ? '☁ Removed from cloud (kept in library)'
+            ? { kind: 'cloud', text: 'Removed from cloud (kept in library)' }
             : action === 'cloud'
-              ? '☁ Deleted from cloud'
-              : '✓ Removed',
+              ? { kind: 'cloud', text: 'Deleted from cloud' }
+              : { kind: 'ok', text: 'Removed' },
         }))
       } catch (e) {
-        setActionStatus(p => ({ ...p, [item.id]: '✗ Error: ' + (e instanceof Error ? e.message : 'failed') }))
+        setActionStatus(p => ({ ...p, [item.id]: { kind: 'error', text: 'Error: ' + (e instanceof Error ? e.message : 'failed') } }))
       }
     }
     exitSelectMode()
@@ -195,18 +220,18 @@ export function Management() {
   async function handleRedownload(item: Movie | TVShow) {
     const tmdbId = item.tmdbId ?? item.tmdbDetail?.id
     if (!tmdbId) {
-      setActionStatus(p => ({ ...p, [item.id]: '✗ No TMDB ID — cannot re-download' }))
+      setActionStatus(p => ({ ...p, [item.id]: { kind: 'error', text: 'No TMDB ID — cannot re-download' } }))
       return
     }
 
-    setActionStatus(p => ({ ...p, [item.id]: 'Searching NZBs...' }))
+    setActionStatus(p => ({ ...p, [item.id]: { kind: 'pending', text: 'Searching NZBs…' } }))
     try {
       const results = tab === 'movies'
         ? await searchMovieNzb(tmdbId)
         : await searchShowNzb(tmdbId)
 
       if (results.length === 0) {
-        setActionStatus(p => ({ ...p, [item.id]: '✗ No NZBs found for this title' }))
+        setActionStatus(p => ({ ...p, [item.id]: { kind: 'error', text: 'No NZBs found for this title' } }))
         return
       }
 
@@ -225,9 +250,9 @@ export function Management() {
       if (tab === 'movies') updateMovieInLibrary(updated as Movie)
       else updateShowInLibrary(updated as TVShow)
 
-      setActionStatus(p => ({ ...p, [item.id]: '⬇ Re-download started!' }))
+      setActionStatus(p => ({ ...p, [item.id]: { kind: 'download', text: 'Re-download started!' } }))
     } catch (e) {
-      setActionStatus(p => ({ ...p, [item.id]: '✗ ' + (e instanceof Error ? e.message : 'Failed') }))
+      setActionStatus(p => ({ ...p, [item.id]: { kind: 'error', text: e instanceof Error ? e.message : 'Failed' } }))
     }
   }
 
@@ -255,7 +280,9 @@ export function Management() {
                   : 'bg-white/10 text-premiumflix-muted hover:text-white hover:bg-white/20'
               }`}
             >
-              {selectMode ? '✕ Cancel' : '☐ Select'}
+              {selectMode
+                ? <><XIcon className="w-3.5 h-3.5 mr-1.5 -mt-px" /> Cancel</>
+                : <><SquareIcon className="w-3.5 h-3.5 mr-1.5 -mt-px" /> Select</>}
             </button>
           </div>
         </div>
@@ -271,25 +298,25 @@ export function Management() {
               onClick={() => setConfirmAction({ type: 'lib', ids: [...selected], mediaType: tab })}
               className="bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
             >
-              📚 Remove from library (keep files)
+              <LibraryIcon className="w-3.5 h-3.5 mr-1.5 -mt-px" /> Remove from library (keep files)
             </button>
             <button
               onClick={() => setConfirmAction({ type: 'cloudOnly', ids: [...selected], mediaType: tab })}
               className="bg-amber-700/80 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
             >
-              ☁ Remove from cloud (keep in library)
+              <CloudOffIcon className="w-3.5 h-3.5 mr-1.5 -mt-px" /> Remove from cloud (keep in library)
             </button>
             <button
               onClick={() => setConfirmAction({ type: 'cloud', ids: [...selected], mediaType: tab })}
               className="bg-red-800/80 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
             >
-              ☁ Delete from cloud only
+              <CloudOffIcon className="w-3.5 h-3.5 mr-1.5 -mt-px" /> Delete from cloud only
             </button>
             <button
               onClick={() => setConfirmAction({ type: 'both', ids: [...selected], mediaType: tab })}
               className="bg-red-700 hover:bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
             >
-              🗑 Delete everywhere
+              <TrashIcon className="w-3.5 h-3.5 mr-1.5 -mt-px" /> Delete everywhere
             </button>
           </div>
         )}
@@ -316,7 +343,9 @@ export function Management() {
             {(['movies', 'shows'] as Tab[]).map(t => (
               <button key={t} onClick={() => { setTab(t); setSearch(''); setFilter('all'); exitSelectMode() }}
                 className={`px-5 py-2.5 text-sm font-bold transition-colors capitalize ${tab === t ? 'bg-premiumflix-red text-white' : 'text-premiumflix-muted hover:text-white'}`}>
-                {t === 'movies' ? `🎬 Movies (${movies.length})` : `📺 Shows (${tvShows.length})`}
+                {t === 'movies'
+                  ? <><FilmIcon className="w-4 h-4 mr-2 -mt-px" /> Movies ({movies.length})</>
+                  : <><TvIcon className="w-4 h-4 mr-2 -mt-px" /> Shows ({tvShows.length})</>}
               </button>
             ))}
           </div>
@@ -412,7 +441,7 @@ export function Management() {
                       {!hasMeta && <span className="text-xs bg-yellow-800/60 text-yellow-300 px-1.5 py-0.5 rounded">No metadata</span>}
                       {!hasPoster && hasMeta && <span className="text-xs bg-orange-800/60 text-orange-300 px-1.5 py-0.5 rounded">No poster</span>}
                       {isCloudRemoved && (
-                        <span className="text-[10px] bg-amber-800/60 text-amber-300 px-1.5 py-0.5 rounded font-bold">☁ Not on cloud</span>
+                        <span className="text-[10px] bg-amber-800/60 text-amber-300 px-1.5 py-0.5 rounded font-bold inline-flex items-center gap-1"><CloudOffIcon className="w-3 h-3" /> Not on cloud</span>
                       )}
                     </div>
                     {isMovie && !isCloudRemoved && (
@@ -432,7 +461,7 @@ export function Management() {
                         {totalSize > 0 && ` · ${formatFileSize(totalSize)}`}
                       </p>
                     )}
-                    {status && <p className="text-xs mt-1 text-green-400">{status}</p>}
+                    {status && <StatusLine status={status} />}
                   </div>
 
                   {/* Actions */}
@@ -444,14 +473,14 @@ export function Management() {
                           className="text-blue-400 hover:text-blue-300 transition-colors p-1.5 rounded hover:bg-blue-900/20 text-xs font-bold"
                           title="Re-download to Premiumize"
                         >
-                          <RefreshIcon />
+                          <RefreshIcon className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => setConfirmAction({ type: 'lib', ids: [id], mediaType: tab })}
                           className="text-premiumflix-muted hover:text-red-400 transition-colors p-1.5 rounded hover:bg-red-900/20"
                           title="Remove from library"
                         >
-                          <LibTrashIcon />
+                          <TrashIcon className="w-4 h-4" />
                         </button>
                       </>
                     ) : (
@@ -466,19 +495,19 @@ export function Management() {
                           onClick={() => setEditingId(isEditing ? null : id)}
                           className={`transition-colors p-1.5 rounded hover:bg-white/10 ${isEditing ? 'text-premiumflix-red' : 'text-premiumflix-muted hover:text-white'}`}
                           title="Edit metadata">
-                          <EditIcon />
+                          <PencilIcon className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => setConfirmAction({ type: 'cloudOnly', ids: [id], mediaType: tab })}
                           className="text-premiumflix-muted hover:text-amber-400 transition-colors p-1.5 rounded hover:bg-amber-900/20"
                           title="Remove from cloud only (keep in library)">
-                          <CloudOffIcon />
+                          <CloudOffIcon className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => setConfirmAction({ type: 'both', ids: [id], mediaType: tab })}
                           className="text-premiumflix-muted hover:text-red-500 transition-colors p-1.5 rounded hover:bg-red-900/20"
                           title="Delete from library + Premiumize cloud">
-                          <CloudTrashIcon />
+                          <CloudTrashIcon className="w-4 h-4" />
                         </button>
                       </>
                     )}
@@ -495,7 +524,7 @@ export function Management() {
                       setEditingId(null)
                       if (tab === 'movies') updateMovieInLibrary(updated as Movie)
                       else updateShowInLibrary(updated as TVShow)
-                      setActionStatus(p => ({ ...p, [id]: '✓ Metadata updated' }))
+                      setActionStatus(p => ({ ...p, [id]: { kind: 'ok', text: 'Metadata updated' } }))
                     }}
                   />
                 )}
@@ -506,7 +535,7 @@ export function Management() {
 
         {items.length === 0 && (
           <div className="text-center py-24 text-premiumflix-muted">
-            <p className="text-4xl mb-3">📭</p>
+            <InboxIcon className="w-12 h-12 mx-auto mb-3 text-white/20" strokeWidth={1.5} />
             <p>{search ? `No results for "${search}"` : filter === 'unwatched' ? 'Everything has been watched!' : filter === 'cloudRemoved' ? 'No cloud-removed items' : filter === 'duplicates' ? 'No duplicates found — your library is clean!' : `No ${tab} in library`}</p>
           </div>
         )}
@@ -636,7 +665,7 @@ function MetadataEditor({ item, mediaType, onClose, onUpdated }: MetadataEditorP
     <div className="border-t border-white/10 p-4 bg-black/20">
       <p className="text-white/60 text-xs font-semibold uppercase tracking-wider mb-3">Edit Metadata — TMDB Search</p>
       {!isTMDB() && (
-        <p className="text-yellow-400 text-sm mb-3">⚠ No TMDB API key configured. Go to Settings to add one.</p>
+        <p className="text-yellow-400 text-sm mb-3 flex items-center gap-1.5"><AlertTriangleIcon className="w-4 h-4" /> No TMDB API key configured. Go to Settings to add one.</p>
       )}
       <div className="flex gap-2 mb-3">
         <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && doSearch()}
@@ -666,7 +695,7 @@ function MetadataEditor({ item, mediaType, onClose, onUpdated }: MetadataEditorP
                 </div>
                 <div className="p-2">
                   <p className="text-white text-xs font-semibold line-clamp-2">{rTitle}</p>
-                  <p className="text-premiumflix-muted text-xs">{rYear} · ★{r.vote_average?.toFixed(1)}</p>
+                  <p className="text-premiumflix-muted text-xs flex items-center gap-1">{rYear} · <StarIcon className="w-3 h-3 text-yellow-400" />{r.vote_average?.toFixed(1)}</p>
                 </div>
               </button>
             )
@@ -686,28 +715,4 @@ function MetadataEditor({ item, mediaType, onClose, onUpdated }: MetadataEditorP
 // ─── Icons ────────────────────────────────────────────────────────────────────
 function EyeIcon() {
   return <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-}
-function EditIcon() {
-  return <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-}
-function LibTrashIcon() {
-  return <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-}
-function CloudTrashIcon() {
-  return <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-}
-function CloudOffIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2 2l20 20" />
-    </svg>
-  )
-}
-function RefreshIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-    </svg>
-  )
 }

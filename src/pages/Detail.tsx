@@ -17,6 +17,7 @@ import {
 } from '../types'
 import type { Movie, TVShow, Season, Episode } from '../types'
 import { useI18n } from '../contexts/I18nContext'
+import { ShuffleIcon, StarIcon, XIcon } from '../components/icons'
 
 export function MovieDetail() {
   const { id } = useParams<{ id: string }>()
@@ -287,7 +288,7 @@ export function ShowDetail() {
                 className="ml-2 text-xs font-medium px-3 py-1.5 rounded bg-premiumflix-surface border border-white/20 text-premiumflix-muted hover:text-white transition-colors"
                 title="Play a random episode"
               >
-                🎲
+                <ShuffleIcon className="w-4 h-4" />
               </button>
             )}
             {seasonViews.length > 1 && (
@@ -546,7 +547,7 @@ function DetailShell({
               {runtime && <span className="text-premiumflix-muted">{runtime}</span>}
               {rating && rating > 0 && (
                 <span className="flex items-center gap-1 text-yellow-400 font-medium">
-                  <span>★</span> {rating.toFixed(1)}
+                  <StarIcon className="w-4 h-4" /> {rating.toFixed(1)}
                 </span>
               )}
               {genres?.map((g) => (
@@ -652,7 +653,7 @@ function DetailShell({
                       onClick={() => setTrailerOpen(false)}
                       className="absolute -top-9 right-0 text-white/70 hover:text-white text-sm font-medium"
                     >
-                      ✕ Close
+                      <XIcon className="w-4 h-4 mr-1 -mt-px" /> Close
                     </button>
                     <iframe
                       src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}

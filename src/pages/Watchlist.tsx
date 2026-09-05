@@ -3,6 +3,7 @@ import { useLibrary } from '../contexts/LibraryContext'
 import { MovieCard, ShowCard } from '../components/MediaCard'
 import { useI18n } from '../contexts/I18nContext'
 import { movieDisplayTitle, showDisplayTitle } from '../types'
+import { ClipboardListIcon, HeartIcon } from '../components/icons'
 
 type SortKey = 'title' | 'year' | 'rating' | 'added'
 type FilterKey = 'all' | 'watchlist' | 'favorites'
@@ -90,7 +91,7 @@ export function Watchlist() {
   if (!hasItems && !search && filter === 'all' && watchlistMovies.length === 0 && favoriteMovies.length === 0 && watchlistShows.length === 0 && favoriteShows.length === 0) {
     return (
       <div className="min-h-screen bg-premiumflix-dark pt-20 flex flex-col items-center justify-center gap-4 text-center px-4">
-        <div className="text-6xl opacity-20">📋</div>
+        <ClipboardListIcon className="w-16 h-16 text-white/20" strokeWidth={1.5} />
         <h1 className="text-white text-2xl font-bold">{t.watchlist.emptyTitle}</h1>
         <p className="text-premiumflix-muted max-w-md">
           {t.watchlist.emptyDesc}
@@ -127,6 +128,7 @@ export function Watchlist() {
                   filter === f ? 'bg-premiumflix-red text-white' : 'text-premiumflix-muted hover:text-white'
                 }`}
               >
+                {f === 'favorites' && <HeartIcon className="w-3.5 h-3.5 mr-1.5 -mt-px" />}
                 {f === 'all' ? 'All' : f === 'watchlist' ? t.watchlist.watchlist : t.watchlist.favorites}
               </button>
             ))}

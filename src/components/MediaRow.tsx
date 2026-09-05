@@ -4,6 +4,7 @@ import { MovieCard, ShowCard } from './MediaCard'
 import { useNavigate } from 'react-router-dom'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import { movieDisplayTitle, showDisplayTitle, movieMainFile, moviePosterUrl, showPosterUrl } from '../types'
+import { ArrowRightIcon } from './icons'
 
 interface MovieRowProps {
   title: string
@@ -61,7 +62,7 @@ function RowShell({
             onClick={() => navigate(showViewAll)}
             className="text-premiumflix-red text-sm font-medium opacity-0 group-hover/row:opacity-100 transition-opacity hover:text-white"
           >
-            See all →
+            See all <ArrowRightIcon className="w-4 h-4 ml-0.5 -mt-px" />
           </button>
         )}
       </div>

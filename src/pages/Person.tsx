@@ -5,6 +5,7 @@ import { profileUrlLarge } from '../types'
 import type { TMDBPersonDetail, TMDBPersonCredit, TMDBPersonCredits } from '../types'
 import { useLibrary } from '../contexts/LibraryContext'
 import { useI18n } from '../contexts/I18nContext'
+import { StarIcon } from '../components/icons'
 
 export function Person() {
   const { id } = useParams<{ id: string }>()
@@ -211,7 +212,7 @@ export function Person() {
                     <div className="flex items-center justify-between mt-0.5">
                       <span className="text-premiumflix-muted text-xs">{creditYear(c)}</span>
                       {c.vote_average != null && c.vote_average > 0 && (
-                        <span className="text-premiumflix-muted text-xs">★ {c.vote_average.toFixed(1)}</span>
+                        <span className="text-premiumflix-muted text-xs inline-flex items-center gap-1"><StarIcon className="w-3 h-3" /> {c.vote_average.toFixed(1)}</span>
                       )}
                     </div>
                     {(showCrew ? c.job : c.character) && (

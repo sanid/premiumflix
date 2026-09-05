@@ -3,6 +3,7 @@ import Hls from 'hls.js'
 import type { SubtitleTrack } from '../types'
 import type { PMSubtitle } from '../services/premiumize'
 import { debugLog } from '../lib/debug'
+import { AlertTriangleIcon, XIcon } from './icons'
 
 interface VideoPlayerProps {
   src: string
@@ -1436,7 +1437,7 @@ export function VideoPlayer({
       {/* Error overlay */}
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80">
-          <div className="text-premiumflix-red text-5xl">⚠</div>
+          <AlertTriangleIcon className="w-14 h-14 text-premiumflix-red" strokeWidth={1.5} />
           <p className="text-white text-center max-w-sm">{error}</p>
           <button
             onClick={(e) => { e.stopPropagation(); onBack?.() }}
@@ -1913,7 +1914,7 @@ export function VideoPlayer({
           >
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-white font-bold text-lg">Keyboard Shortcuts</h3>
-              <button onClick={() => setShowHelp(false)} className="text-white/50 hover:text-white text-lg">✕</button>
+              <button onClick={() => setShowHelp(false)} className="text-white/50 hover:text-white"><XIcon className="w-5 h-5" /></button>
             </div>
             <div className="space-y-2 text-sm">
               {[

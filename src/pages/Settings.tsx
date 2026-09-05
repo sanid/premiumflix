@@ -13,6 +13,7 @@ import { movieMainFile } from '../types'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import type { ScanFolderSelection, PMItem } from '../types'
 import { useI18n } from '../contexts/I18nContext'
+import { AlertTriangleIcon, FolderIcon, FilmIcon, TvIcon, CheckIcon } from '../components/icons'
 
 export function Settings() {
   const { scan, clearAndRescan, isLoading, movies, tvShows, restoreFromCloud } = useLibrary()
@@ -64,7 +65,7 @@ export function Settings() {
       if (signal.cancelled) return
       setTraktConnected(isTraktConnected())
       setTraktUserCode(null)
-      setTraktStatus('✓ Connected to Trakt!')
+      setTraktStatus('Connected to Trakt!')
       setTimeout(() => setTraktStatus(null), 4000)
     } catch (e) {
       setTraktError(e instanceof Error ? e.message : 'Connection failed')
@@ -107,7 +108,7 @@ export function Settings() {
         }
       }
       await markFilesWatched(fileIds)
-      setTraktStatus(`✓ Imported ${fileIds.length} watched items from Trakt`)
+      setTraktStatus(`Imported ${fileIds.length} watched items from Trakt`)
       setTimeout(() => setTraktStatus(null), 5000)
     } catch (e) {
       setTraktError(e instanceof Error ? e.message : 'Import failed')
@@ -339,7 +340,7 @@ export function Settings() {
               </select>
               {languageChanged && (
                 <div className="mt-2 flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
-                  <span className="text-amber-400 text-xs">⚠</span>
+                  <AlertTriangleIcon className="w-4 h-4 text-amber-400 mt-px" />
                   <p className="text-amber-300 text-xs">{t.settings.langWarning}</p>
                 </div>
               )}
@@ -367,7 +368,7 @@ export function Settings() {
                 const sel = selectedFolders.find((f) => f.id === folder.id)
                 return (
                   <div key={folder.id} className="flex items-center justify-between bg-premiumflix-surface rounded-md px-3 py-2">
-                    <span className="text-white text-sm truncate mr-2">📁 {folder.name}</span>
+                    <span className="text-white text-sm truncate mr-2 flex items-center gap-2"><FolderIcon className="w-4 h-4 text-premiumflix-muted" /> {folder.name}</span>
                     <div className="flex gap-2 flex-shrink-0">
                       <button
                         onClick={() => toggleFolder(folder, 'movies')}
@@ -400,7 +401,10 @@ export function Settings() {
             <div className="mt-3 flex flex-wrap gap-2">
               {selectedFolders.map((f) => (
                 <span key={f.id} className="text-xs bg-premiumflix-surface border border-white/20 text-white px-2 py-1 rounded">
-                  {f.name} ({f.kind === 'movies' ? '🎬' : '📺'})
+                  <span className="inline-flex items-center gap-1.5">
+                    {f.kind === 'movies' ? <FilmIcon className="w-3.5 h-3.5" /> : <TvIcon className="w-3.5 h-3.5" />}
+                    {f.name}
+                  </span>
                 </span>
               ))}
             </div>
@@ -598,6 +602,7 @@ export function Settings() {
             disabled={isLoading}
             className="bg-premiumflix-red text-white font-bold px-6 py-2.5 rounded hover:bg-premiumflix-red-hover transition-colors disabled:opacity-50"
           >
+            {saved && <CheckIcon className="w-4 h-4 mr-1.5 -mt-px" />}
             {saved ? t.settings.saved : t.settings.saveSettings}
           </button>
           {languageChanged && (

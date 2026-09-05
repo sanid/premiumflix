@@ -11,6 +11,10 @@ import { useLibrary } from '../contexts/LibraryContext'
 import { searchMovieRaw, searchTVRaw } from '../services/metadata'
 import { movieDetail, tvDetail } from '../services/tmdb'
 import type { TMDBMovieDetail } from '../types'
+import {
+  FilmIcon, TvIcon, StarIcon, GlobeIcon, CaptionsIcon, PackageIcon,
+  XCircleIcon, ArrowUpIcon, ArrowDownIcon,
+} from '../components/icons'
 
 type MediaTypeFilter = 'movie' | 'show'
 type SortDirection = 'asc' | 'desc'
@@ -408,7 +412,7 @@ export function AddMovie() {
                 mediaType === 'movie' ? 'bg-premiumflix-red text-white' : 'text-premiumflix-muted hover:text-white'
               }`}
             >
-              🎬 Movies
+              <FilmIcon className="w-4 h-4 mr-2 -mt-px" /> Movies
             </button>
             <button
               onClick={() => setMediaType('show')}
@@ -418,7 +422,7 @@ export function AddMovie() {
                 mediaType === 'show' ? 'bg-premiumflix-red text-white' : 'text-premiumflix-muted hover:text-white'
               }`}
             >
-              📺 TV Shows
+              <TvIcon className="w-4 h-4 mr-2 -mt-px" /> TV Shows
             </button>
           </div>
 
@@ -464,7 +468,7 @@ export function AddMovie() {
                   <h3 className="text-white font-bold text-sm truncate">{movie.title}</h3>
                   <div className="flex justify-between items-center mt-1">
                     <span className="text-premiumflix-muted text-xs">{movie.year}</span>
-                    <span className="text-yellow-400 text-xs font-medium">★ {movie.rating}</span>
+                    <span className="text-yellow-400 text-xs font-medium inline-flex items-center gap-1"><StarIcon className="w-3 h-3" /> {movie.rating}</span>
                   </div>
                 </div>
               </div>
@@ -495,7 +499,7 @@ export function AddMovie() {
                   <h3 className="text-white font-bold text-sm truncate">{item.title || item.name}</h3>
                   <div className="flex justify-between items-center mt-1">
                     <span className="text-premiumflix-muted text-xs">{(item.release_date || item.first_air_date || '').split('-')[0]}</span>
-                    <span className="text-yellow-400 text-xs font-medium">★ {item.vote_average?.toFixed(1)}</span>
+                    <span className="text-yellow-400 text-xs font-medium inline-flex items-center gap-1"><StarIcon className="w-3 h-3" /> {item.vote_average?.toFixed(1)}</span>
                   </div>
                 </div>
               </div>
@@ -525,11 +529,13 @@ export function AddMovie() {
                     </h2>
                     <div className="flex gap-3 text-sm text-premiumflix-muted">
                       <span>{selectedMovie?.year || (selectedTmdbItem?.release_date || selectedTmdbItem?.first_air_date || '').split('-')[0]}</span>
-                      <span className="text-yellow-400 font-medium">★ {selectedMovie?.rating || selectedTmdbItem?.vote_average?.toFixed(1)}</span>
+                      <span className="text-yellow-400 font-medium inline-flex items-center gap-1"><StarIcon className="w-3.5 h-3.5" /> {selectedMovie?.rating || selectedTmdbItem?.vote_average?.toFixed(1)}</span>
                     </div>
                     <div className="mt-2">
                       <span className={`text-xs font-bold px-2 py-0.5 rounded ${mediaType === 'show' ? 'bg-blue-700 text-white' : 'bg-premiumflix-red text-white'}`}>
-                        {mediaType === 'show' ? '📺 TV Show' : '🎬 Movie'}
+                        {mediaType === 'show'
+                          ? <><TvIcon className="w-3 h-3 mr-1 -mt-px" /> TV Show</>
+                          : <><FilmIcon className="w-3 h-3 mr-1 -mt-px" /> Movie</>}
                       </span>
                     </div>
                   </div>
@@ -672,7 +678,7 @@ export function AddMovie() {
                                 <svg className={`w-3.5 h-3.5 transition-transform ${nzbSortSize === 'asc' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                 </svg>
-                                Size {nzbSortSize === 'desc' ? '↓' : '↑'}
+                                Size {nzbSortSize === 'desc' ? <ArrowDownIcon className="w-3 h-3" /> : <ArrowUpIcon className="w-3 h-3" />}
                               </button>
 
                               {/* Results count */}
@@ -721,17 +727,17 @@ export function AddMovie() {
                                   )}
                                   {item.language && (
                                     <span className="inline-flex items-center gap-1 bg-blue-900/50 text-blue-300 text-[10px] font-medium px-2 py-0.5 rounded-md">
-                                      🌐 {item.language}
+                                      <GlobeIcon className="w-3 h-3" /> {item.language}
                                     </span>
                                   )}
                                   {item.subs && (
                                     <span className="inline-flex items-center gap-1 bg-purple-900/40 text-purple-300 text-[10px] font-medium px-2 py-0.5 rounded-md">
-                                      💬 {item.subs}
+                                      <CaptionsIcon className="w-3 h-3" /> {item.subs}
                                     </span>
                                   )}
                                   {sizeGB && (
                                     <span className="inline-flex items-center gap-1 bg-amber-900/40 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                                      📦 {sizeGB} GB
+                                      <PackageIcon className="w-3 h-3" /> {sizeGB} GB
                                     </span>
                                   )}
                                   {mediaType === 'show' && item.season != null && (
@@ -786,7 +792,9 @@ export function AddMovie() {
                                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                                       Download complete
                                     </span>
-                                  ) : s === 'error' ? '✗ Retry' : '+ Add NZB'}
+                                  ) : s === 'error'
+                                    ? <><XCircleIcon className="w-3.5 h-3.5 mr-1" /> Retry</>
+                                    : '+ Add NZB'}
                                 </button>
                               </div>
                             )

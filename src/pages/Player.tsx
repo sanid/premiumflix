@@ -10,6 +10,7 @@ import { getProgress } from '../db'
 import { debugLog } from '../lib/debug'
 import { movieDisplayTitle, showDisplayTitle, movieMainFile } from '../types'
 import type { MediaFile } from '../types'
+import { AlertTriangleIcon } from '../components/icons'
 
 type PlayMode = 'movie' | 'show'
 
@@ -306,7 +307,7 @@ export function Player() {
   if (error || !playUrl) {
     return (
       <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-4 px-4 text-center">
-        <div className="text-premiumflix-red text-5xl">⚠</div>
+        <AlertTriangleIcon className="w-14 h-14 text-premiumflix-red" strokeWidth={1.5} />
         <p className="text-white font-semibold">{error ?? 'Playback unavailable'}</p>
         <button
           onClick={() => navigate(-1)}

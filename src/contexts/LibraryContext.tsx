@@ -5,6 +5,34 @@ import { saveLibrary, loadLibrary, clearLibrary, appendMovie, appendTVShow, dele
 import { ingestItem, ingestEpisode } from '../services/autoIngest'
 import { listTransfers } from '../services/premiumize'
 import { syncLibraryToCloud, loadLibraryFromCloud } from '../services/cloudSync'
+import {
+  SparklesIcon, CheckCircleIcon, XCircleIcon, DownloadIcon, CloudDownloadIcon, InboxIcon, XIcon,
+} from '../components/icons'
+
+
+export type NotificationKind = 'info' | 'success' | 'error' | 'download' | 'cloud' | 'empty' | 'new'
+
+export interface AppNotification {
+  id: number
+  kind: NotificationKind
+  text: string
+}
+
+const NOTIFICATION_ICONS: Record<NotificationKind, { Icon: (p: { className?: string }) => JSX.Element; color: string }> = {
+  info: { Icon: SparklesIcon, color: 'text-premiumflix-muted' },
+  success: { Icon: CheckCircleIcon, color: 'text-green-400' },
+  error: { Icon: XCircleIcon, color: 'text-red-400' },
+  download: { Icon: DownloadIcon, color: 'text-blue-400' },
+  cloud: { Icon: CloudDownloadIcon, color: 'text-sky-300' },
+  empty: { Icon: InboxIcon, color: 'text-premiumflix-muted' },
+  new: { Icon: SparklesIcon, color: 'text-premiumflix-red' },
+}
+
+/** Icon for a toast / notification-centre entry, coloured by its kind. */
+export function NotificationIcon({ kind, className = 'w-4 h-4' }: { kind: NotificationKind; className?: string }) {
+  const { Icon, color } = NOTIFICATION_ICONS[kind]
+  return <span className={color}><Icon className={className} /></span>
+}
 
 interface LibraryContextValue {
   movies: Movie[]
@@ -22,7 +50,7 @@ interface LibraryContextValue {
   updateMovieInLibrary: (movie: Movie) => void
   updateShowInLibrary: (show: TVShow) => void
   monitorTransfer: (transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show'; season?: number; episode?: number }) => void
-  notifications: string[]
+  notifications: AppNotification[]
   dismissNotification: (index: number) => void
   restoreFromCloud: () => Promise<boolean>
   favoriteIds: Set<string>
@@ -44,15 +72,15 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const [initialized, setInitialized] = useState(false)
   const scanningRef = useRef(false)
 
-  const [notifications, setNotifications] = useState<{ id: number; text: string }[]>([])
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
   const nextNotificationId = useRef(0)
   const [pendingTransfers, setPendingTransfers] = useState<{ id: string; name: string; tmdbId?: number; type?: 'movie' | 'show'; season?: number; episode?: number }[]>([])
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
   const [watchlistIds, setWatchlistIds] = useState<Set<string>>(new Set())
 
-  const addNotification = useCallback((text: string) => {
+  const addNotification = useCallback((text: string, kind: NotificationKind = 'info') => {
     const id = nextNotificationId.current++
-    setNotifications(prev => [...prev, { id, text }])
+    setNotifications(prev => [...prev, { id, kind, text }])
     // Each notification dismisses itself after 8s
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id))
@@ -100,7 +128,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
           const status = t.status?.toLowerCase() ?? ''
           if (status === 'success' || status === 'finished' || status === 'seeding') {
             completed.push(pt.id)
-            addNotification(`✅ Download finished: ${pt.name}. You can now rescan your library!`)
+            addNotification(`Download finished: ${pt.name}. You can now rescan your library!`, 'success')
             
             // If we have metadata hints, store them for the scanner
             if (pt.tmdbId && pt.type) {
@@ -113,7 +141,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
             }
           } else if (status === 'error' || status === 'failed') {
             completed.push(pt.id)
-            addNotification(`❌ Download failed: ${pt.name}`)
+            addNotification(`Download failed: ${pt.name}`, 'error')
           }
         }
         
@@ -168,7 +196,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       if (prev.some(p => p.id === transferId)) return prev
       const next = [...prev, { id: transferId, name, ...metadata }]
       localStorage.setItem('pending_transfers', JSON.stringify(next))
-      addNotification(`⬇️ Download started: ${name}`)
+      addNotification(`Download started: ${name}`, 'download')
       return next
     })
   }, [])
@@ -241,7 +269,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     if (newMovies) parts.push(`${newMovies} new movie${newMovies > 1 ? 's' : ''}`)
     if (newShows) parts.push(`${newShows} new show${newShows > 1 ? 's' : ''}`)
     if (newEpisodes > 0) parts.push(`${newEpisodes} new episode${newEpisodes !== 1 ? 's' : ''}`)
-    if (parts.length) addNotification(`🆕 Library update: ${parts.join(', ')}`)
+    if (parts.length) addNotification(`Library update: ${parts.join(', ')}`, 'new')
   }, [scan, addNotification])
 
   useEffect(() => {
@@ -301,7 +329,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     try {
       const cloudLib = await loadLibraryFromCloud()
       if (!cloudLib) {
-        addNotification('📭 No cloud backup found on Premiumize.')
+        addNotification('No cloud backup found on Premiumize.', 'empty')
         return false
       }
       
@@ -309,11 +337,11 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       setTVShows(cloudLib.tvShows)
       await saveLibrary(cloudLib.movies, cloudLib.tvShows)
       
-      addNotification('☁️ Library restored from cloud!')
+      addNotification('Library restored from cloud!', 'cloud')
       return true
     } catch (e) {
       console.error(e)
-      addNotification('❌ Failed to restore from cloud.')
+      addNotification('Failed to restore from cloud.', 'error')
       return false
     } finally {
       setIsLoading(false)
@@ -370,7 +398,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
         updateMovieInLibrary,
         updateShowInLibrary,
         monitorTransfer,
-        notifications: notifications.map(n => n.text),
+        notifications,
         dismissNotification,
         restoreFromCloud,
         favoriteIds,
@@ -386,9 +414,12 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       {notifications.length > 0 && (
         <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full">
           {notifications.map((note, i) => (
-            <div key={note.id} className="bg-premiumflix-surface border border-white/20 shadow-2xl rounded p-4 flex justify-between items-start gap-3">
-              <p className="text-white text-sm font-medium">{note.text}</p>
-              <button onClick={() => dismissNotification(i)} className="text-white/50 hover:text-white">✕</button>
+            <div key={note.id} className="bg-premiumflix-surface border border-white/20 shadow-2xl rounded p-4 flex items-start gap-3">
+              <NotificationIcon kind={note.kind} className="w-5 h-5 mt-px" />
+              <p className="text-white text-sm font-medium flex-1">{note.text}</p>
+              <button onClick={() => dismissNotification(i)} className="text-white/50 hover:text-white">
+                <XIcon className="w-4 h-4" />
+              </button>
             </div>
           ))}
         </div>

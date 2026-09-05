@@ -6,6 +6,7 @@ import { movieDisplayTitle, showDisplayTitle, posterUrl } from '../types'
 import type { TMDBMovie } from '../types'
 import { searchMovieRaw, searchTVRaw } from '../services/metadata'
 import { useI18n } from '../contexts/I18nContext'
+import { StarIcon } from '../components/icons'
 
 export function Search() {
   const [searchParams] = useSearchParams()
@@ -140,7 +141,7 @@ export function Search() {
                         <p className="text-white text-xs font-semibold truncate">{title}</p>
                         <div className="flex items-center gap-2 mt-1">
                           {year && <span className="text-premiumflix-muted text-xs">{year}</span>}
-                          {r.vote_average ? <span className="text-yellow-400 text-xs">★ {r.vote_average.toFixed(1)}</span> : null}
+                          {r.vote_average ? <span className="text-yellow-400 text-xs inline-flex items-center gap-1"><StarIcon className="w-3 h-3" /> {r.vote_average.toFixed(1)}</span> : null}
                         </div>
                       </div>
                       <div className="absolute top-2 right-2 bg-premiumflix-red text-white text-[10px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">

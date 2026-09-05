@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
 import { listFolder, accountInfo } from '../services/premiumize'
 import type { PMItem, ScanFolderSelection } from '../types'
+import { FilmIcon, TvIcon } from '../components/icons'
 
 type Step = 'connect' | 'folders' | 'done'
 
@@ -272,7 +273,7 @@ export function Setup() {
                               : 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/60'
                           }`}
                         >
-                          🎬 Movies
+                          <FilmIcon className="w-3 h-3 mr-1 -mt-px" /> Movies
                         </button>
                         <button
                           onClick={() => assignFolder(folder, 'tvShows')}
@@ -282,7 +283,7 @@ export function Setup() {
                               : 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/60'
                           }`}
                         >
-                          📺 Shows
+                          <TvIcon className="w-3 h-3 mr-1 -mt-px" /> Shows
                         </button>
                         {assignment && (
                           <button
@@ -316,7 +317,7 @@ export function Setup() {
                           : 'bg-purple-900/50 text-purple-300 border border-purple-500/30'
                       }`}
                     >
-                      {f.kind === 'movies' ? '🎬' : '📺'} {f.name}
+                      {f.kind === 'movies' ? <FilmIcon className="w-3 h-3 mr-1 -mt-px" /> : <TvIcon className="w-3 h-3 mr-1 -mt-px" />} {f.name}
                     </span>
                   ))}
                 </div>
