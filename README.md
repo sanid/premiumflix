@@ -81,7 +81,7 @@ A sleek streaming frontend that connects directly to your Premiumize.me cloud st
 - **Video Player**: Full-featured player with play/pause, seek with thumbnails, volume, quality selector, audio/subtitle tracks, playback speed, Picture-in-Picture, AirPlay, and Chromecast. Mobile-optimized with swipe gestures, double-tap to seek, and landscape detection.
 - **Casting**: Built-in support for AirPlay and Chromecast.
 - **Snappy UI**: Caches all metadata and watch progress locally in your browser (via IndexedDB), keeping load times instant.
-- **Backups**: Library, favorites, watchlist and watch progress auto-sync to your Premiumize cloud — plus full JSON export/import in Settings.
+- **Backups**: Full JSON export/import in Settings. Optionally — off by default — the library, favorites, watchlist and watch progress can also be backed up to your Premiumize cloud so you can restore on another device. Nothing is written to your storage unless you turn that on.
 - **Multilingual**: Supports English and German.
 
 ## Desktop app

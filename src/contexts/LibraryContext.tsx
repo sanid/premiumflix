@@ -47,6 +47,22 @@ export function NotificationIcon({ kind, className = 'w-4 h-4' }: { kind: Notifi
   return <span className={`shrink-0 ${color}`}><Icon className={className} /></span>
 }
 
+export const CLOUD_SYNC_KEY = 'cloud_sync_enabled'
+
+/**
+ * Whether the library may be backed up to the user's Premiumize storage.
+ *
+ * Opt-in, and deliberately so — syncing uploads a `premiumflix_library.json`
+ * into their cloud and deletes whatever was there before.
+ */
+export function isCloudSyncEnabled(): boolean {
+  return localStorage.getItem(CLOUD_SYNC_KEY) === 'true'
+}
+
+export function setCloudSyncEnabled(on: boolean): void {
+  localStorage.setItem(CLOUD_SYNC_KEY, String(on))
+}
+
 interface LibraryContextValue {
   movies: Movie[]
   tvShows: TVShow[]
@@ -119,9 +135,14 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     } catch { /* corrupt localStorage — ignore */ }
   }, [])
 
-  // Auto-sync to cloud when library changes (debounced 60s, skip if empty)
+  // Auto-sync to cloud when the library changes (debounced 60s, skip if empty).
+  //
+  // Off unless the user turns it on in Settings: this writes a file into their
+  // Premiumize storage and replaces any previous copy, which is not something to
+  // do to someone's cloud on their behalf.
   useEffect(() => {
     if (!initialized) return
+    if (!isCloudSyncEnabled()) return
     if (movies.length === 0 && tvShows.length === 0) return
     const timer = setTimeout(() => {
       syncLibraryToCloud(movies, tvShows).catch(() => {

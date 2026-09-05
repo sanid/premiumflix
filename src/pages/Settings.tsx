@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useLibrary } from '../contexts/LibraryContext'
+import { useLibrary, isCloudSyncEnabled, setCloudSyncEnabled } from '../contexts/LibraryContext'
 import { accountInfo } from '../services/premiumize'
 import { listFolder } from '../services/premiumize'
 import { isTMDB } from '../services/metadata'
@@ -25,6 +25,7 @@ export function Settings() {
   const [pmKey, setPmKey] = useState(localStorage.getItem('pm_api_key') || import.meta.env.VITE_PM_API_KEY || '')
   const [tmdbKey, setTmdbKey] = useState(localStorage.getItem('tmdb_api_key') || import.meta.env.VITE_TMDB_API_KEY || '')
   const [nzbKey, setNzbKey] = useState(localStorage.getItem('scenenzbs_api_key') || import.meta.env.VITE_SCENENZBS_API_KEY || '')
+  const [cloudSync, setCloudSync] = useState(isCloudSyncEnabled())
   const [language, setLanguage] = useState(localStorage.getItem('tmdb_language') ?? 'en-US')
   const [savedLang, setSavedLang] = useState(localStorage.getItem('tmdb_language') ?? 'en-US')
   const [autoRescanHours, setAutoRescanHours] = useState(localStorage.getItem('auto_rescan_hours') ?? '0')
@@ -435,6 +436,25 @@ export function Settings() {
 
         {/* ─── Backup & Restore ─────────────────────────────────────────── */}
         <Section title="Backup & Restore">
+          {/* Opt-in: enabling this writes a file into the user's Premiumize
+              storage and replaces any earlier copy, so it stays off by default. */}
+          <label className="flex items-start gap-3 mb-4 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={cloudSync}
+              onChange={(e) => { setCloudSync(e.target.checked); setCloudSyncEnabled(e.target.checked) }}
+              className="mt-0.5 w-4 h-4 accent-premiumflix-red flex-shrink-0"
+            />
+            <span>
+              <span className="text-white text-sm font-semibold block">Back up my library to Premiumize</span>
+              <span className="text-premiumflix-muted/60 text-xs block mt-0.5">
+                Keeps a <code className="text-premiumflix-muted">premiumflix_library.json</code> in your
+                cloud storage so you can restore on another device. It is rewritten whenever your library
+                changes, replacing the previous copy. Off by default — your files are never touched either way.
+              </span>
+            </span>
+          </label>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button
               onClick={restoreFromCloud}
@@ -443,7 +463,7 @@ export function Settings() {
             >
               <CloudIcon className="w-5 h-5 text-premiumflix-muted group-hover:text-white transition-colors mb-2" />
               <p className="text-white text-sm font-semibold">Cloud Restore</p>
-              <p className="text-premiumflix-muted/60 text-xs mt-1">Auto-backed up to Premiumize</p>
+              <p className="text-premiumflix-muted/60 text-xs mt-1">Load a backup from your cloud</p>
             </button>
             <button
               onClick={handleExport}
