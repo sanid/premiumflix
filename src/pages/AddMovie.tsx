@@ -44,6 +44,8 @@ export function AddMovie() {
   const [nzbResFilter, setNzbResFilter] = useState<string>('all')
   const [nzbLangFilter, setNzbLangFilter] = useState<string>('all')
   const [nzbCodecFilter, setNzbCodecFilter] = useState<string>('all')
+  const [nzbPackFilter, setNzbPackFilter] = useState<'all' | 'packs' | 'episodes'>('all')
+  const [nzbSeasonFilter, setNzbSeasonFilter] = useState<number | 'all'>('all')
   const [nzbSortSize, setNzbSortSize] = useState<SortDirection>('desc')
 
   // Derived: unique filter values from NZB results
@@ -66,19 +68,43 @@ export function AddMovie() {
     }
   }, [nzbItems])
 
+  // A show's releases are overwhelmingly single episodes, so surface how many
+  // whole-season packs are in there and let the user narrow to just those.
+  const { packCount, episodeCount, seasonNumbers } = useMemo(() => {
+    const seasons = new Set<number>()
+    let packs = 0
+    for (const item of nzbItems) {
+      if (item.isSeasonPack) packs++
+      const covered = item.seasons ?? (item.season != null ? [item.season] : [])
+      covered.forEach(n => seasons.add(n))
+    }
+    return {
+      packCount: packs,
+      episodeCount: nzbItems.length - packs,
+      seasonNumbers: Array.from(seasons).sort((a, b) => a - b),
+    }
+  }, [nzbItems])
+
   const filteredNzbItems = useMemo(() => {
     let items = nzbItems
     if (nzbResFilter !== 'all') items = items.filter(i => i.resolution === nzbResFilter)
     if (nzbLangFilter !== 'all') items = items.filter(i => i.language === nzbLangFilter)
     if (nzbCodecFilter !== 'all') items = items.filter(i => i.codec === nzbCodecFilter)
+    if (nzbPackFilter === 'packs') items = items.filter(i => i.isSeasonPack)
+    if (nzbPackFilter === 'episodes') items = items.filter(i => !i.isSeasonPack)
+    if (nzbSeasonFilter !== 'all') {
+      items = items.filter(i => (i.seasons ?? (i.season != null ? [i.season] : [])).includes(nzbSeasonFilter))
+    }
     items = [...items].sort((a, b) => nzbSortSize === 'desc' ? b.size - a.size : a.size - b.size)
     return items
-  }, [nzbItems, nzbResFilter, nzbLangFilter, nzbCodecFilter, nzbSortSize])
+  }, [nzbItems, nzbResFilter, nzbLangFilter, nzbCodecFilter, nzbPackFilter, nzbSeasonFilter, nzbSortSize])
 
   function resetNzbFilters() {
     setNzbResFilter('all')
     setNzbLangFilter('all')
     setNzbCodecFilter('all')
+    setNzbPackFilter('all')
+    setNzbSeasonFilter('all')
     setNzbSortSize('desc')
   }
 
@@ -633,6 +659,37 @@ export function AddMovie() {
                           {/* ── NZB Filter & Sort Bar ── */}
                           {nzbItems.length > 0 && (
                             <div className="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b border-white/10">
+                              {/* Season pack vs episode — only meaningful for shows */}
+                              {mediaType === 'show' && packCount > 0 && (
+                                <>
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    <span className="text-[10px] uppercase tracking-wider text-premiumflix-muted font-bold mr-1">Type</span>
+                                    <FilterPill active={nzbPackFilter === 'all'} onClick={() => setNzbPackFilter('all')}>All</FilterPill>
+                                    <FilterPill active={nzbPackFilter === 'packs'} onClick={() => setNzbPackFilter('packs')}>
+                                      Full seasons ({packCount})
+                                    </FilterPill>
+                                    <FilterPill active={nzbPackFilter === 'episodes'} onClick={() => setNzbPackFilter('episodes')}>
+                                      Episodes ({episodeCount})
+                                    </FilterPill>
+                                  </div>
+                                  <span className="text-white/10 hidden sm:inline">|</span>
+                                </>
+                              )}
+
+                              {/* Season filter */}
+                              {mediaType === 'show' && seasonNumbers.length > 1 && (
+                                <>
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    <span className="text-[10px] uppercase tracking-wider text-premiumflix-muted font-bold mr-1">Season</span>
+                                    <FilterPill active={nzbSeasonFilter === 'all'} onClick={() => setNzbSeasonFilter('all')}>All</FilterPill>
+                                    {seasonNumbers.map(n => (
+                                      <FilterPill key={n} active={nzbSeasonFilter === n} onClick={() => setNzbSeasonFilter(n)}>S{String(n).padStart(2, '0')}</FilterPill>
+                                    ))}
+                                  </div>
+                                  <span className="text-white/10 hidden sm:inline">|</span>
+                                </>
+                              )}
+
                               {/* Resolution filter */}
                               <div className="flex items-center gap-1 flex-wrap">
                                 <span className="text-[10px] uppercase tracking-wider text-premiumflix-muted font-bold mr-1">Resolution</span>
@@ -743,6 +800,14 @@ export function AddMovie() {
                                   {mediaType === 'show' && item.season != null && (
                                     <span className="inline-flex items-center bg-emerald-900/40 text-emerald-300 text-[10px] font-medium px-2 py-0.5 rounded-md">
                                       S{String(item.season).padStart(2,'0')}{item.episode != null ? `E${String(item.episode).padStart(2,'0')}` : ''}
+                                    </span>
+                                  )}
+                                  {mediaType === 'show' && item.isSeasonPack && (
+                                    <span className="inline-flex items-center gap-1 bg-sky-900/50 text-sky-300 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                      <PackageIcon className="w-3 h-3" />
+                                      {item.seasons && item.seasons.length > 1
+                                        ? `${item.seasons.length} seasons`
+                                        : 'Full season'}
                                     </span>
                                   )}
                                 </div>

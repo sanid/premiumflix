@@ -12,6 +12,10 @@ export interface SceneNzbItem {
   episode?: number
   resolution?: string
   codec?: string
+  /** A whole-season (or multi-season) pack rather than a single episode. */
+  isSeasonPack: boolean
+  /** Seasons the pack covers, for `S01-S03` style multi-season releases. */
+  seasons?: number[]
 }
 
 // Route through server-side proxy — key is never exposed to the browser.
@@ -45,6 +49,43 @@ function parseTitleInfo(title: string) {
 
   return { resolution, codec }
 }
+
+/**
+ * Decide whether a release is a whole-season pack.
+ *
+ * The indexer is authoritative: it reports a `season` attribute but omits
+ * `episode` for packs. Titles are only consulted to recover the season
+ * numbers, and as a guard for indexers that omit the attribute entirely —
+ * matching season numbers in a release name is unreliable on its own
+ * ("DS4K" and "x265" both look like season markers without an anchor).
+ */
+function detectSeasonPack(title: string, episodeAttr?: number): { isSeasonPack: boolean; seasons?: number[] } {
+  // Anchor season markers to a token boundary, or DS4K reads as "season 4".
+  const BOUND = '(?:^|[\\s._\\-\\[(])'
+  const hasEpisodeMarker = new RegExp(`${BOUND}[Ss]\\d{1,2}[\\s._-]?[Ee]\\d{1,3}`).test(title)
+  const episodeRange = /[Ee]\d{1,3}[\s._-]*-[\s._-]*[Ee]?\d{1,3}/.test(title)
+
+  // A single-episode marker settles it, unless it opens an E01-E16 style range.
+  if (episodeAttr != null || (hasEpisodeMarker && !episodeRange)) {
+    return { isSeasonPack: false }
+  }
+
+  // S01-S03 / Season 1 to 3 — a multi-season pack.
+  const range = title.match(new RegExp(`${BOUND}[Ss](\\d{1,2})[\\s._-]*(?:-|to|thru)[\\s._-]*[Ss](\\d{1,2})`))
+  if (range) {
+    const [from, to] = [parseInt(range[1], 10), parseInt(range[2], 10)].sort((a, b) => a - b)
+    const seasons: number[] = []
+    for (let n = from; n <= to && n - from < 50; n++) seasons.push(n)
+    return { isSeasonPack: true, seasons }
+  }
+
+  // Pack already established, so just read the number off the season marker.
+  const single = title.match(new RegExp(`${BOUND}(?:[Ss]eason|[Ss]taffel|[Ss]eizoen|[Ss])[\\s._-]?(\\d{1,2})\\b`))
+  return { isSeasonPack: true, seasons: single ? [parseInt(single[1], 10)] : undefined }
+}
+
+/** The indexer caps a single response at 500 items. */
+export const NZB_MAX_LIMIT = 500
 
 export async function searchSceneNzbs(params: Record<string, string>): Promise<SceneNzbItem[]> {
   const url = new URL(API_URL, window.location.href)
@@ -113,6 +154,14 @@ export async function searchSceneNzbs(params: Record<string, string>): Promise<S
       }
     }
 
+    // Only TV results can be packs; movie titles would trip the season regexes.
+    const pack = params.t === 'tvsearch'
+      ? detectSeasonPack(item.title, episode)
+      : { isSeasonPack: false, seasons: undefined }
+    if (pack.isSeasonPack && season == null && pack.seasons?.length) {
+      season = pack.seasons[0]
+    }
+
     return {
       title: item.title,
       guid: item.guid,
@@ -127,6 +176,8 @@ export async function searchSceneNzbs(params: Record<string, string>): Promise<S
       episode,
       resolution,
       codec,
+      isSeasonPack: pack.isSeasonPack,
+      seasons: pack.seasons,
     }
   })
 }
@@ -152,6 +203,11 @@ export async function searchShowNzb(queryOrId: string | number, season?: number,
 
   if (season !== undefined) params.season = season.toString()
   if (episode !== undefined) params.episode = episode.toString()
+
+  // Season packs are a small minority of a show's releases — roughly 2% — so
+  // the default page of 250 is mostly single episodes and can miss packs
+  // entirely. Ask for the indexer's maximum when browsing a whole show.
+  if (episode === undefined) params.limit = NZB_MAX_LIMIT.toString()
 
   return searchSceneNzbs(params)
 }
