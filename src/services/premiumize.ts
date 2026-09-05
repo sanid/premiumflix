@@ -9,6 +9,11 @@ function getApiKey(): string {
   return localStorage.getItem('pm_api_key') || import.meta.env.VITE_PM_API_KEY || ''
 }
 
+/** Whether a Premiumize key is configured — cheap guard before background polling. */
+export function hasApiKey(): boolean {
+  return getApiKey().length > 0
+}
+
 // In dev, use the Vite proxy to avoid CORS issues.
 // In production, requests go directly (Premiumize supports CORS for API key auth).
 function baseUrl(): string {

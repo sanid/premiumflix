@@ -3,11 +3,12 @@ import type { Movie, TVShow, ScanFolderSelection } from '../types'
 import { scanLibrary, type ScanProgress } from '../services/scanner'
 import { saveLibrary, loadLibrary, clearLibrary, appendMovie, appendTVShow, deleteMovie, deleteTVShow, toggleFavorite as dbToggleFavorite, toggleWatchlist as dbToggleWatchlist, getFavoriteIds, getWatchlistIds } from '../db'
 import { ingestItem, ingestEpisode } from '../services/autoIngest'
-import { listTransfers } from '../services/premiumize'
+import { listTransfers, hasApiKey } from '../services/premiumize'
 import { syncLibraryToCloud, loadLibraryFromCloud } from '../services/cloudSync'
 import {
   SparklesIcon, CheckCircleIcon, XCircleIcon, DownloadIcon, CloudDownloadIcon, InboxIcon, XIcon,
 } from '../components/icons'
+import { DownloadsOverlay } from '../components/DownloadsOverlay'
 
 
 export type NotificationKind = 'info' | 'success' | 'error' | 'download' | 'cloud' | 'empty' | 'new'
@@ -16,6 +17,18 @@ export interface AppNotification {
   id: number
   kind: NotificationKind
   text: string
+}
+
+/** A Premiumize transfer that is still working, for the downloads overlay. */
+export interface ActiveTransfer {
+  id: string
+  name: string
+  /** Premiumize status: running, queued, waiting, … */
+  status: string
+  /** 0-1, or null while the transfer has not reported any yet. */
+  progress: number | null
+  /** Human-readable line from Premiumize, e.g. "46% of 28660 MB. ETA is 0:03:21". */
+  message?: string
 }
 
 const NOTIFICATION_ICONS: Record<NotificationKind, { Icon: (p: { className?: string }) => JSX.Element; color: string }> = {
@@ -52,6 +65,7 @@ interface LibraryContextValue {
   monitorTransfer: (transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show'; season?: number; episode?: number }) => void
   notifications: AppNotification[]
   dismissNotification: (index: number) => void
+  activeTransfers: ActiveTransfer[]
   restoreFromCloud: () => Promise<boolean>
   favoriteIds: Set<string>
   watchlistIds: Set<string>
@@ -60,6 +74,9 @@ interface LibraryContextValue {
   toggleFavorite: (id: string, type: 'movie' | 'show') => Promise<void>
   toggleWatchlist: (id: string, type: 'movie' | 'show') => Promise<void>
 }
+
+/** Premiumize statuses that mean "still working". */
+const IN_FLIGHT_STATUSES = new Set(['running', 'queued', 'waiting', 'pending'])
 
 const LibraryContext = createContext<LibraryContextValue | null>(null)
 
@@ -73,6 +90,8 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const scanningRef = useRef(false)
 
   const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [activeTransfers, setActiveTransfers] = useState<ActiveTransfer[]>([])
+  const activeCount = activeTransfers.length
   const nextNotificationId = useRef(0)
   const [pendingTransfers, setPendingTransfers] = useState<{ id: string; name: string; tmdbId?: number; type?: 'movie' | 'show'; season?: number; episode?: number }[]>([])
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
@@ -112,14 +131,40 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer)
   }, [movies, tvShows, initialized])
 
-  // Poll pending transfers (only when there are any)
+  // Poll Premiumize transfers.
+  //
+  // This runs whenever a key is configured, not just when this browser started
+  // a transfer, so the downloads overlay also reflects downloads queued from
+  // another device or from Premiumize's own site. It backs off to once a minute
+  // while nothing is in flight; the completion/ingest work below is a no-op
+  // unless this browser has pending transfers of its own.
   useEffect(() => {
-    if (pendingTransfers.length === 0) return
+    if (!hasApiKey()) {
+      setActiveTransfers([])
+      return
+    }
     
-    const interval = setInterval(async () => {
+    // Run once up front so the downloads overlay appears immediately on load
+    // instead of after a full interval.
+    const poll = async () => {
       try {
         const { transfers } = await listTransfers()
         const completed: string[] = []
+
+        // Anything still working feeds the downloads overlay. Reading the whole
+        // list rather than only our own pending ids costs nothing extra and also
+        // surfaces transfers queued from elsewhere while we happen to be polling.
+        setActiveTransfers(
+          (transfers ?? [])
+            .filter(t => IN_FLIGHT_STATUSES.has((t.status ?? '').toLowerCase()))
+            .map(t => ({
+              id: t.id,
+              name: (t.name ?? 'Unknown').trim().replace(/\.nzb$/i, ''),
+              status: (t.status ?? '').toLowerCase(),
+              progress: typeof t.progress === 'number' ? t.progress : null,
+              message: t.message ?? undefined,
+            })),
+        )
         
         for (const pt of pendingTransfers) {
           const t = transfers?.find(x => x.id === pt.id)
@@ -186,10 +231,14 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {
         console.error('Failed to poll transfers', e)
       }
-    }, 10_000)
-    
+    }
+
+    poll()
+    const busy = pendingTransfers.length > 0 || activeCount > 0
+    const interval = setInterval(poll, busy ? 10_000 : 60_000)
+
     return () => clearInterval(interval)
-  }, [pendingTransfers])
+  }, [pendingTransfers, activeCount])
 
   const monitorTransfer = useCallback((transferId: string, name: string, metadata?: { tmdbId: number; type: 'movie' | 'show'; season?: number; episode?: number }) => {
     setPendingTransfers(prev => {
@@ -400,6 +449,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
         monitorTransfer,
         notifications,
         dismissNotification,
+        activeTransfers,
         restoreFromCloud,
         favoriteIds,
         watchlistIds,
@@ -410,8 +460,8 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
-      {/* Toast Notifications */}
-      {notifications.length > 0 && (
+      {/* Toasts, with the downloads panel pinned beneath them */}
+      {(notifications.length > 0 || activeTransfers.length > 0) && (
         <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-sm">
           {notifications.map((note, i) => (
             <div key={note.id} className="bg-premiumflix-surface border border-white/20 shadow-2xl rounded p-4 flex items-start gap-3">
@@ -424,6 +474,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           ))}
+          <DownloadsOverlay transfers={activeTransfers} />
         </div>
       )}
     </LibraryContext.Provider>
