@@ -3,12 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { useLibrary } from '../contexts/LibraryContext'
 import { useWatchProgress } from '../hooks/useWatchProgress'
 import { useI18n } from '../contexts/I18nContext'
-import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl, movieMainFile } from '../types'
+import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl, hasProgress } from '../types'
 import type { Movie, TVShow } from '../types'
 
 export function Stats() {
   const { movies, tvShows } = useLibrary()
-  const { progressMap, isFinished } = useWatchProgress()
+  const { progressMap, isFinished, getProgressFraction } = useWatchProgress()
   const { t } = useI18n()
   const navigate = useNavigate()
 
@@ -17,75 +17,79 @@ export function Stats() {
     let moviesWatchedCount = 0
     let episodesWatchedCount = 0
     const genreMap = new Map<string, number>()
-    const recentlyFinished: Array<{
+    const recentlyWatched: Array<{
       type: 'movie' | 'show'
       title: string
       poster?: string
       id: string
       lastWatched: number
+      fraction: number
     }> = []
 
-    for (const movie of movies) {
-      const mainFile = movieMainFile(movie)
-      const fileIds = movie.files.map(f => f.id)
-      const isWatched = fileIds.some(fId => isFinished(fId))
+    // A file counts as "touched" when it has real progress or is finished —
+    // partially watched items still contribute watch time and history.
+    const touched = (fileId: string): boolean => {
+      const p = progressMap.get(fileId)
+      return isFinished(fileId) || (p ? hasProgress(p) : false)
+    }
 
-      if (isWatched) {
-        moviesWatchedCount++
-        for (const fId of fileIds) {
+    for (const movie of movies) {
+      const fileIds = movie.files.map(f => f.id)
+      const touchedIds = fileIds.filter(touched)
+      const finished = fileIds.some(id => isFinished(id))
+
+      if (touchedIds.length > 0) {
+        for (const fId of touchedIds) {
           const p = progressMap.get(fId)
           if (p) totalSeconds += p.position
         }
-        recentlyFinished.push({
+        if (finished) moviesWatchedCount++
+        const genres = movie.tmdbDetail?.genres ?? []
+        for (const g of genres) {
+          genreMap.set(g.name, (genreMap.get(g.name) ?? 0) + 1)
+        }
+        recentlyWatched.push({
           type: 'movie',
           title: movieDisplayTitle(movie),
           poster: moviePosterUrl(movie),
           id: movie.id,
-          lastWatched: Math.max(...fileIds.map(fId => progressMap.get(fId)?.lastWatched ?? 0)),
+          lastWatched: Math.max(0, ...touchedIds.map(fId => progressMap.get(fId)?.lastWatched ?? 0)),
+          fraction: Math.max(0, ...touchedIds.map(fId => getProgressFraction(fId))),
         })
-      }
-
-      const genres = movie.tmdbDetail?.genres ?? []
-      if (isWatched) {
-        for (const g of genres) {
-          genreMap.set(g.name, (genreMap.get(g.name) ?? 0) + 1)
-        }
       }
     }
 
     for (const show of tvShows) {
+      const touchedEpisodes: string[] = []
       for (const season of show.seasons) {
         for (const ep of season.episodes) {
           const fId = ep.file.id
           if (isFinished(fId)) {
             episodesWatchedCount++
-            const p = progressMap.get(fId)
-            if (p) totalSeconds += p.position
+            touchedEpisodes.push(fId)
+          } else if (touched(fId)) {
+            touchedEpisodes.push(fId)
           }
         }
       }
 
-      const hasWatchedEp = show.seasons.some(s =>
-        s.episodes.some(e => isFinished(e.file.id))
-      )
-      if (hasWatchedEp) {
-        recentlyFinished.push({
-          type: 'show',
-          title: showDisplayTitle(show),
-          poster: showPosterUrl(show),
-          id: show.id,
-          lastWatched: Math.max(
-            ...show.seasons.flatMap(s =>
-              s.episodes
-                .filter(e => isFinished(e.file.id))
-                .map(e => progressMap.get(e.file.id)?.lastWatched ?? 0)
-            )
-          ),
-        })
+      if (touchedEpisodes.length > 0) {
+        for (const fId of touchedEpisodes) {
+          const p = progressMap.get(fId)
+          if (p) totalSeconds += p.position
+        }
         const genres = show.tmdbDetail?.genres ?? []
         for (const g of genres) {
           genreMap.set(g.name, (genreMap.get(g.name) ?? 0) + 1)
         }
+        recentlyWatched.push({
+          type: 'show',
+          title: showDisplayTitle(show),
+          poster: showPosterUrl(show),
+          id: show.id,
+          lastWatched: Math.max(0, ...touchedEpisodes.map(fId => progressMap.get(fId)?.lastWatched ?? 0)),
+          fraction: Math.max(0, ...touchedEpisodes.map(fId => getProgressFraction(fId))),
+        })
       }
     }
 
@@ -93,7 +97,7 @@ export function Stats() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)
 
-    recentlyFinished.sort((a, b) => b.lastWatched - a.lastWatched)
+    recentlyWatched.sort((a, b) => b.lastWatched - a.lastWatched)
 
     const totalHours = (totalSeconds / 3600).toFixed(1)
     const maxGenreCount = topGenres.length > 0 ? topGenres[0][1] : 1
@@ -103,13 +107,13 @@ export function Stats() {
       moviesWatchedCount,
       episodesWatchedCount,
       topGenres,
-      recentlyFinished: recentlyFinished.slice(0, 12),
+      recentlyWatched: recentlyWatched.slice(0, 12),
       maxGenreCount,
       totalLibraryItems: movies.length + tvShows.length,
     }
-  }, [movies, tvShows, progressMap, isFinished])
+  }, [movies, tvShows, progressMap, isFinished, getProgressFraction])
 
-  const hasData = stats.moviesWatchedCount > 0 || stats.episodesWatchedCount > 0
+  const hasData = stats.moviesWatchedCount > 0 || stats.episodesWatchedCount > 0 || stats.recentlyWatched.length > 0
 
   return (
     <div className="min-h-screen bg-premiumflix-dark pt-20 pb-16">
@@ -150,21 +154,26 @@ export function Stats() {
               </section>
             )}
 
-            {stats.recentlyFinished.length > 0 && (
+            {stats.recentlyWatched.length > 0 && (
               <section>
                 <h2 className="text-white font-bold text-lg mb-4">{t.stats.recentlyWatched}</h2>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                  {stats.recentlyFinished.map(item => (
+                  {stats.recentlyWatched.map(item => (
                     <button
                       key={item.id}
                       onClick={() => navigate(`/${item.type === 'movie' ? 'movie' : 'show'}/${item.id}`)}
                       className="group text-left"
                     >
-                      <div className="aspect-[2/3] rounded-md overflow-hidden bg-premiumflix-surface mb-1.5">
+                      <div className="relative aspect-[2/3] rounded-md overflow-hidden bg-premiumflix-surface mb-1.5">
                         {item.poster ? (
                           <img src={item.poster} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" loading="lazy" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-premiumflix-muted text-xs p-2 text-center">{item.title}</div>
+                        )}
+                        {item.fraction > 0 && item.fraction < 1 && (
+                          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+                            <div className="h-full bg-premiumflix-red" style={{ width: `${item.fraction * 100}%` }} />
+                          </div>
                         )}
                       </div>
                       <p className="text-white text-xs truncate">{item.title}</p>
