@@ -5,6 +5,12 @@ import { accountInfo } from '../services/premiumize'
 import { listFolder } from '../services/premiumize'
 import { isTMDB } from '../services/metadata'
 import { exportLibraryData, importLibraryData, clearMetaCache, type LibraryBackup } from '../db'
+import {
+  getTraktClientId, setTraktClientId, isTraktConnected, disconnectTrakt,
+  startDeviceAuth, pollDeviceToken, fetchWatchedMovies, fetchWatchedShows,
+} from '../services/trakt'
+import { movieMainFile } from '../types'
+import { useWatchProgress } from '../hooks/useWatchProgress'
 import type { ScanFolderSelection, PMItem } from '../types'
 import { useI18n } from '../contexts/I18nContext'
 
@@ -12,11 +18,13 @@ export function Settings() {
   const { scan, clearAndRescan, isLoading, movies, tvShows, restoreFromCloud } = useLibrary()
   const { t } = useI18n()
   const navigate = useNavigate()
+  const { markFilesWatched } = useWatchProgress()
 
   const [pmKey, setPmKey] = useState(localStorage.getItem('pm_api_key') || import.meta.env.VITE_PM_API_KEY || '')
   const [tmdbKey, setTmdbKey] = useState(localStorage.getItem('tmdb_api_key') || import.meta.env.VITE_TMDB_API_KEY || '')
   const [language, setLanguage] = useState(localStorage.getItem('tmdb_language') ?? 'en-US')
   const [savedLang, setSavedLang] = useState(localStorage.getItem('tmdb_language') ?? 'en-US')
+  const [autoRescanHours, setAutoRescanHours] = useState(localStorage.getItem('auto_rescan_hours') ?? '0')
   const [saved, setSaved] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -35,6 +43,78 @@ export function Settings() {
   })
   const [loadingFolders, setLoadingFolders] = useState(false)
 
+  // ─── Trakt sync state ────────────────────────────────────────────────────
+  const [traktClientIdInput, setTraktClientIdInput] = useState(getTraktClientId())
+  const [traktConnected, setTraktConnected] = useState(isTraktConnected())
+  const [traktUserCode, setTraktUserCode] = useState<string | null>(null)
+  const [traktStatus, setTraktStatus] = useState<string | null>(null)
+  const [traktError, setTraktError] = useState<string | null>(null)
+  const traktPollRef = useRef<{ cancelled: boolean } | null>(null)
+
+  async function connectTrakt() {
+    setTraktClientId(traktClientIdInput)
+    setTraktError(null)
+    try {
+      const code = await startDeviceAuth()
+      setTraktUserCode(code.user_code)
+      setTraktStatus('Waiting for authorization...')
+      const signal = { cancelled: false }
+      traktPollRef.current = signal
+      await pollDeviceToken(code, signal)
+      if (signal.cancelled) return
+      setTraktConnected(isTraktConnected())
+      setTraktUserCode(null)
+      setTraktStatus('✓ Connected to Trakt!')
+      setTimeout(() => setTraktStatus(null), 4000)
+    } catch (e) {
+      setTraktError(e instanceof Error ? e.message : 'Connection failed')
+      setTraktUserCode(null)
+      setTraktStatus(null)
+    }
+  }
+
+  function cancelTraktConnect() {
+    if (traktPollRef.current) traktPollRef.current.cancelled = true
+    setTraktUserCode(null)
+    setTraktStatus(null)
+  }
+
+  async function importTraktWatched() {
+    setTraktError(null)
+    setTraktStatus('Importing watched history...')
+    try {
+      const [wMovies, wShows] = await Promise.all([fetchWatchedMovies(), fetchWatchedShows()])
+      const fileIds: string[] = []
+      for (const w of wMovies) {
+        if (w.plays <= 0) continue
+        const tmdbId = w.movie.ids?.tmdb
+        const m = tmdbId ? movies.find(x => x.tmdbId === tmdbId) : undefined
+        const main = m ? movieMainFile(m) : undefined
+        if (main) fileIds.push(main.id)
+      }
+      for (const w of wShows) {
+        const tmdbId = w.show.ids?.tmdb
+        const show = tmdbId ? tvShows.find(s => s.tmdbId === tmdbId) : undefined
+        if (!show) continue
+        for (const ws of w.seasons) {
+          const season = show.seasons.find(s => s.number === ws.number)
+          if (!season) continue
+          for (const we of ws.episodes) {
+            if (we.plays <= 0) continue
+            const ep = season.episodes.find(e => e.number === we.number)
+            if (ep) fileIds.push(ep.file.id)
+          }
+        }
+      }
+      await markFilesWatched(fileIds)
+      setTraktStatus(`✓ Imported ${fileIds.length} watched items from Trakt`)
+      setTimeout(() => setTraktStatus(null), 5000)
+    } catch (e) {
+      setTraktError(e instanceof Error ? e.message : 'Import failed')
+      setTraktStatus(null)
+    }
+  }
+
   useEffect(() => {
     accountInfo()
       .then((data) => setAccountData({ premiumUntil: data.premium_until, spaceUsed: data.space_used }))
@@ -48,6 +128,7 @@ export function Settings() {
     localStorage.setItem('tmdb_api_key', tmdbKey.trim())
     localStorage.setItem('tmdb_language', language)
     localStorage.setItem('scan_folders', JSON.stringify(selectedFolders))
+    localStorage.setItem('auto_rescan_hours', autoRescanHours)
     setSavedLang(language)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
@@ -58,6 +139,7 @@ export function Settings() {
     localStorage.setItem('tmdb_api_key', tmdbKey.trim())
     localStorage.setItem('tmdb_language', language)
     localStorage.setItem('scan_folders', JSON.stringify(selectedFolders))
+    localStorage.setItem('auto_rescan_hours', autoRescanHours)
     setSavedLang(language)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
@@ -369,6 +451,85 @@ export function Settings() {
           )}
         </Section>
 
+        {/* ─── Trakt Sync ───────────────────────────────────────────────── */}
+        <Section title="Trakt Sync">
+          {traktConnected ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="w-2 h-2 rounded-full bg-green-400" />
+                <span className="text-white font-medium">Connected to Trakt</span>
+              </div>
+              <p className="text-premiumflix-muted/60 text-xs">
+                Playback is scrobbled automatically: start/pause while watching, marked watched past 80%.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={importTraktWatched}
+                  className="bg-white/10 text-white text-sm font-medium px-4 py-2 rounded hover:bg-white/20 transition-colors"
+                >
+                  Import watched history
+                </button>
+                <button
+                  onClick={() => { disconnectTrakt(); setTraktConnected(false); setTraktStatus(null) }}
+                  className="bg-white/10 text-red-400 text-sm font-medium px-4 py-2 rounded hover:bg-red-900/20 transition-colors"
+                >
+                  Disconnect
+                </button>
+              </div>
+            </div>
+          ) : traktUserCode ? (
+            <div className="space-y-3">
+              <p className="text-white text-sm">Open <span className="font-bold">trakt.tv/activate</span> and enter this code:</p>
+              <div className="bg-premiumflix-dark border border-white/20 rounded-lg py-4 text-center">
+                <span className="text-white text-3xl font-black tracking-[0.3em]">{traktUserCode}</span>
+              </div>
+              <div className="flex gap-2">
+                <a
+                  href="https://trakt.tv/activate"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bg-premiumflix-red text-white text-sm font-bold px-4 py-2 rounded hover:bg-premiumflix-red-hover transition-colors"
+                >
+                  Open trakt.tv/activate
+                </a>
+                <button
+                  onClick={cancelTraktConnect}
+                  className="bg-white/10 text-white text-sm font-medium px-4 py-2 rounded hover:bg-white/20 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+              {traktStatus && <p className="text-premiumflix-muted text-xs animate-pulse">{traktStatus}</p>}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-premiumflix-muted text-sm">
+                Sync watch progress with your Trakt account. Requires a Trakt app client ID (free at trakt.tv/oauth/applications).
+              </p>
+              {import.meta.env.VITE_TRAKT_CLIENT_ID ? null : (
+                <div>
+                  <label className="text-premiumflix-muted text-sm block mb-1">Trakt Client ID</label>
+                  <input
+                    type="text"
+                    value={traktClientIdInput}
+                    onChange={(e) => setTraktClientIdInput(e.target.value)}
+                    className="w-full bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none focus:border-white/40"
+                    placeholder="Paste your Trakt application client ID"
+                  />
+                </div>
+              )}
+              <button
+                onClick={connectTrakt}
+                disabled={!getTraktClientId() && !traktClientIdInput.trim()}
+                className="bg-premiumflix-red text-white text-sm font-bold px-4 py-2 rounded hover:bg-premiumflix-red-hover transition-colors disabled:opacity-50"
+              >
+                Connect Trakt
+              </button>
+            </div>
+          )}
+          {traktError && <p className="text-red-400 text-sm mt-3">{traktError}</p>}
+        </Section>
+
         {/* ─── Library Actions ──────────────────────────────────────────── */}
         <Section title={t.settings.library}>
           <div className="flex flex-wrap gap-3">
@@ -410,6 +571,22 @@ export function Settings() {
           <p className="text-premiumflix-muted/60 text-xs mt-2">
             Scan results are cached locally — rescans only fetch metadata for new titles.
           </p>
+          <div className="mt-4">
+            <label className="text-premiumflix-muted text-sm block mb-1">{t.settings.autoRescan}</label>
+            <select
+              value={autoRescanHours}
+              onChange={(e) => setAutoRescanHours(e.target.value)}
+              className="bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none focus:border-white/40 cursor-pointer"
+            >
+              <option value="0">{t.settings.autoRescanOff}</option>
+              <option value="6">{t.settings.autoRescan6h}</option>
+              <option value="12">{t.settings.autoRescan12h}</option>
+              <option value="24">{t.settings.autoRescan24h}</option>
+            </select>
+            <p className="text-premiumflix-muted/60 text-xs mt-1">
+              Rescans periodically while a tab is open and notifies you about new movies and episodes.
+            </p>
+          </div>
         </Section>
       </div>
 

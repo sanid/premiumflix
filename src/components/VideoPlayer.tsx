@@ -12,6 +12,7 @@ interface VideoPlayerProps {
   openSubtitles?: PMSubtitle[]
   initialPosition?: number
   onProgress?: (position: number, duration: number) => void
+  onPlayStateChange?: (playing: boolean) => void
   onBack?: () => void
   onEnded?: () => void
   onNextEpisode?: () => void
@@ -26,6 +27,7 @@ export function VideoPlayer({
   openSubtitles,
   initialPosition = 0,
   onProgress,
+  onPlayStateChange,
   onBack,
   onEnded,
   onNextEpisode,
@@ -38,6 +40,8 @@ export function VideoPlayer({
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const seekBarRef = useRef<HTMLDivElement>(null)
   const subtitleBlobRef = useRef<string | null>(null)
+  const onPlayStateRef = useRef<((playing: boolean) => void) | undefined>(undefined)
+  onPlayStateRef.current = onPlayStateChange
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -60,6 +64,8 @@ export function VideoPlayer({
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null)
   const [hlsSubTracks, setHlsSubTracks] = useState<{ id: number; name: string; lang: string }[]>([])
   const [activeHlsSub, setActiveHlsSub] = useState<number>(-1)
+  const [subOffset, setSubOffset] = useState(0)
+  const cueBaseRef = useRef<WeakMap<TextTrackCue, { start: number; end: number }>>(new WeakMap())
   const [showSubMenu, setShowSubMenu] = useState(false)
   const userSubOffRef = useRef(false) // tracks explicit user "off" intent
 
@@ -372,6 +378,46 @@ export function VideoPlayer({
     return () => clearInterval(interval)
   }, [activeHlsSub, activeSubtitle, hlsSubTracks, subtitles, openSubtitles])
 
+  // ─── Subtitle sync offset ───────────────────────────────────────────────────
+  // Shifts cue timings of the showing track by subOffset seconds. Original cue
+  // times are remembered so changes never drift, and 0 restores them exactly.
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    let active: TextTrack | null = null
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const tt = video.textTracks[i]
+      if ((tt.kind === 'subtitles' || tt.kind === 'captions') && tt.mode === 'showing') {
+        active = tt
+        break
+      }
+    }
+    if (!active) return
+
+    const apply = () => {
+      const cues = active?.cues
+      if (!cues) return
+      for (let i = 0; i < cues.length; i++) {
+        const cue = cues[i]
+        let base = cueBaseRef.current.get(cue)
+        if (!base) {
+          base = { start: cue.startTime, end: cue.endTime }
+          cueBaseRef.current.set(cue, base)
+        }
+        cue.startTime = Math.max(0, base.start + subOffset)
+        cue.endTime = base.end + subOffset
+      }
+    }
+
+    apply()
+    // Cues can populate lazily after the track activates — retry a couple times
+    const t1 = setTimeout(apply, 400)
+    const t2 = setTimeout(apply, 1200)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [subOffset, activeHlsSub, activeSubtitle, hlsSubTracks, subtitles])
+
   // ─── External subtitle loading ────────────────────────────────────────────
 
   useEffect(() => {
@@ -450,12 +496,13 @@ export function VideoPlayer({
       }
     }
 
-    const onPlay = () => setIsPlaying(true)
-    const onPause = () => setIsPlaying(false)
+    const onPlay = () => { setIsPlaying(true); onPlayStateRef.current?.(true) }
+    const onPause = () => { setIsPlaying(false); onPlayStateRef.current?.(false) }
     const onWaiting = () => setIsLoading(true)
     const onCanPlay = () => setIsLoading(false)
     const handleEnded = () => {
       setIsPlaying(false)
+      onPlayStateRef.current?.(false)
       if (onNextEpisode) {
         setShowNextUp(true)
         setNextUpCountdown(10)
@@ -885,6 +932,43 @@ export function VideoPlayer({
 
   // ─── Mobile menu content builders ─────────────────────────────────────────
 
+  function renderSubOffsetControl(hoverStyle: boolean) {
+    if (!activeSubtitle && activeHlsSub < 0) return null
+    const btnCls = hoverStyle
+      ? 'w-7 h-7 rounded bg-white/10 text-white text-sm font-bold active:bg-white/25 transition-colors'
+      : 'w-6 h-6 rounded bg-white/10 text-white text-xs font-bold hover:bg-white/25 transition-colors'
+    return (
+      <div className="px-4 py-2.5 border-t border-white/10">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-white/40 text-xs font-bold uppercase tracking-wider">Subtitle Sync</span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); setSubOffset(o => Math.max(-30, Math.round((o - 0.5) * 10) / 10)) }}
+              className={btnCls}
+              title="Subtitles 0.5s earlier"
+            >
+              −
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setSubOffset(0) }}
+              title={subOffset !== 0 ? 'Tap to reset' : undefined}
+              className={`text-xs w-14 text-center tabular-nums ${subOffset === 0 ? 'text-white/50' : 'text-white font-bold'}`}
+            >
+              {subOffset > 0 ? '+' : ''}{subOffset.toFixed(1)}s
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setSubOffset(o => Math.min(30, Math.round((o + 0.5) * 10) / 10)) }}
+              className={btnCls}
+              title="Subtitles 0.5s later"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const subtitleMenuContent = useMemo(() => (
     <>
       <div className="px-4 py-2 text-white/40 text-xs font-bold uppercase tracking-wider border-b border-white/10">Subtitles</div>
@@ -944,8 +1028,9 @@ export function VideoPlayer({
           {track.label}
         </button>
       ))}
+      {renderSubOffsetControl(true)}
     </>
-  ), [hlsSubTracks, subtitles, activeHlsSub, activeSubtitle, closeAllMenus])
+  ), [hlsSubTracks, subtitles, activeHlsSub, activeSubtitle, closeAllMenus, subOffset])
 
   const settingsMenuContent = useMemo(() => (
     <>
@@ -1607,6 +1692,7 @@ export function VideoPlayer({
                           ))}
                         </>
                       )}
+                      {renderSubOffsetControl(false)}
                     </div>
                   )}
                 </div>

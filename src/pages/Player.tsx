@@ -5,6 +5,7 @@ import { useWatchProgress } from '../hooks/useWatchProgress'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { itemDetails, fetchSubtitles } from '../services/premiumize'
 import type { PMSubtitle } from '../services/premiumize'
+import { scrobble, isTraktConnected, type TraktScrobbleMedia } from '../services/trakt'
 import { getProgress } from '../db'
 import { debugLog } from '../lib/debug'
 import { movieDisplayTitle, showDisplayTitle, movieMainFile } from '../types'
@@ -157,7 +158,92 @@ export function Player() {
 
   function handleProgress(position: number, duration: number) {
     if (file && duration > 0) saveProgress(file.id, position, duration)
+    lastPosRef.current = position
+    lastDurRef.current = duration
+    // Scrobble "stop" once past 80% — Trakt marks it watched
+    if (playingRef.current && traktMedia && !stopSentRef.current && position / duration >= 0.8) {
+      stopSentRef.current = true
+      scrobble('stop', traktMedia, 100).catch(() => {})
+    }
   }
+
+  // ─── Trakt scrobbling ───────────────────────────────────────────────────────
+
+  const traktMedia = useMemo<TraktScrobbleMedia | null>(() => {
+    if (!isTraktConnected()) return null
+    if (mode === 'movie') {
+      const movie = movies.find((m) => m.id === mediaId)
+      if (!movie) return null
+      const year = parseInt(movie.tmdbDetail?.release_date?.slice(0, 4) ?? movie.year ?? '0', 10)
+      return {
+        movie: {
+          title: movieDisplayTitle(movie),
+          year: year > 1900 ? year : undefined,
+          ids: { tmdb: movie.tmdbId },
+        },
+      }
+    }
+    const show = tvShows.find((s) => s.id === mediaId)
+    if (!show) return null
+    for (const season of show.seasons) {
+      const ep = season.episodes.find((e) => e.file.id === fileId)
+      if (ep) {
+        const year = parseInt(show.tmdbDetail?.first_air_date?.slice(0, 4) ?? show.year ?? '0', 10)
+        return {
+          show: {
+            title: showDisplayTitle(show),
+            year: year > 1900 ? year : undefined,
+            ids: { tmdb: show.tmdbId },
+          },
+          episode: { season: season.number, number: ep.number },
+        }
+      }
+    }
+    return null
+  }, [mode, mediaId, fileId, movies, tvShows])
+
+  const [playing, setPlaying] = useState(false)
+  const lastPosRef = useRef(0)
+  const lastDurRef = useRef(0)
+  const playingRef = useRef(false)
+  const startedRef = useRef(false)
+  const stopSentRef = useRef(false)
+  const traktMediaRef = useRef<TraktScrobbleMedia | null>(null)
+  traktMediaRef.current = traktMedia
+
+  // Reset per-file scrobble state when switching files/episodes
+  useEffect(() => {
+    startedRef.current = false
+    stopSentRef.current = false
+    lastPosRef.current = 0
+    lastDurRef.current = 0
+  }, [fileId])
+
+  useEffect(() => {
+    if (!traktMedia || !isTraktConnected()) return
+    const pct = lastDurRef.current > 0 ? (lastPosRef.current / lastDurRef.current) * 100 : 0
+    if (playing) {
+      playingRef.current = true
+      startedRef.current = true
+      if (!stopSentRef.current) scrobble('start', traktMedia, pct).catch(() => {})
+    } else {
+      playingRef.current = false
+      if (startedRef.current && !stopSentRef.current) {
+        scrobble('pause', traktMedia, pct).catch(() => {})
+      }
+    }
+  }, [playing, traktMedia])
+
+  // Best-effort pause when leaving the player mid-watch
+  useEffect(() => {
+    return () => {
+      const media = traktMediaRef.current
+      if (media && isTraktConnected() && startedRef.current && !stopSentRef.current) {
+        const pct = lastDurRef.current > 0 ? (lastPosRef.current / lastDurRef.current) * 100 : 0
+        scrobble('pause', media, pct).catch(() => {})
+      }
+    }
+  }, [])
 
   function handleBack() {
     navigate(-1)
@@ -242,6 +328,7 @@ export function Player() {
         openSubtitles={openSubs}
         initialPosition={initialPosition}
         onProgress={handleProgress}
+        onPlayStateChange={setPlaying}
         onBack={handleBack}
         onNextEpisode={nextEpisodeInfo ? handleNextEpisode : undefined}
         nextEpisodeLabel={nextEpisodeInfo?.label}
