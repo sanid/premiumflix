@@ -20,6 +20,45 @@
 
 A sleek streaming frontend that connects directly to your Premiumize.me cloud storage. It scans your Premiumize folders, matches files with TMDB, and gives you a Netflix-like interface to stream your own media library right in the browser.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="Home screen with hero banner and Continue Watching row" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/movies.png" alt="Movie library grid with search, filters and sorting" width="49%">
+  <img src="docs/screenshots/detail.png" alt="Movie detail page with resume progress, cast and actions" width="49%">
+</p>
+
+<details>
+<summary><b>More screenshots</b> — stats, library management, adding titles</summary>
+
+<br>
+
+**Watch statistics** — totals, top genres and recently watched.
+
+<img src="docs/screenshots/stats.png" alt="Watch statistics" width="100%">
+
+**Library management** — multi-select, filters, and bulk removal.
+
+<img src="docs/screenshots/management.png" alt="Library management" width="100%">
+
+**Adding a title** — search a source, then pick a release.
+
+<img src="docs/screenshots/add-movie.png" alt="Searching for a movie to add" width="49%">
+<img src="docs/screenshots/release-picker.png" alt="Choosing a release quality" width="49%">
+
+**My List** — favorites and watchlist in one place.
+
+<img src="docs/screenshots/watchlist.png" alt="My List" width="100%">
+
+</details>
+
+> The library shown is made up entirely of public-domain films, so the screenshots
+> stay shareable. The app itself is content-agnostic — it plays whatever is in your
+> own Premiumize storage.
+
 ## What it does
 
 - **Direct Streaming**: Plays your Premiumize video files natively using HLS with adaptive quality, hover thumbnails, and subtitle support (embedded + OpenSubtitles with sync offset).
