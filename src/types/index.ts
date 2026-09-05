@@ -423,6 +423,19 @@ export function movieMainFile(m: Movie): MediaFile | undefined {
   }, undefined)
 }
 
+// Local episode count vs what TMDB says the show has
+export function showEpisodeCounts(s: TVShow): { have: number; total: number } {
+  const have = s.seasons.reduce((n, season) => n + season.episodes.length, 0)
+  let total = 0
+  if (s.tmdbDetail?.seasons) {
+    for (const ts of s.tmdbDetail.seasons) {
+      if (ts.season_number === 0) continue // specials
+      total += ts.episode_count ?? 0
+    }
+  }
+  return { have, total }
+}
+
 export function isProgressFinished(p: WatchProgress): boolean {
   return p.duration > 0 && p.position / p.duration >= 0.9
 }

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Movie, TVShow } from '../types'
-import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl } from '../types'
+import { movieDisplayTitle, showDisplayTitle, moviePosterUrl, showPosterUrl, showEpisodeCounts } from '../types'
 
 interface MovieCardProps {
   movie: Movie
@@ -106,6 +106,8 @@ export function ShowCard({ show, isWatched, onPlay }: ShowCardProps) {
   const year = show.tmdbDetail?.first_air_date?.slice(0, 4) ?? show.year
   const rating = show.tmdbDetail?.vote_average
   const seasons = show.tmdbDetail?.number_of_seasons
+  const { have, total } = showEpisodeCounts(show)
+  const incomplete = total > have
 
   return (
     <div
@@ -133,11 +135,23 @@ export function ShowCard({ show, isWatched, onPlay }: ShowCardProps) {
           <div className="flex items-center gap-2 mt-1">
             {year && <span className="text-premiumflix-muted text-xs">{year}</span>}
             {seasons && <span className="text-premiumflix-muted text-xs">{seasons}S</span>}
+            {total > 0 && (
+              <span className={`text-xs ${incomplete ? 'text-amber-400' : 'text-green-400'}`}>
+                {have}/{total} EP
+              </span>
+            )}
             {rating && rating > 0 && (
               <span className="text-yellow-400 text-xs">★ {rating.toFixed(1)}</span>
             )}
           </div>
         </div>
+
+        {/* Incomplete badge (visible without hover) */}
+        {incomplete && (
+          <div className="absolute top-2 left-2 bg-black/60 rounded px-1.5 py-0.5">
+            <span className="text-amber-400 text-[10px] font-bold">{have}/{total} EP</span>
+          </div>
+        )}
 
         {onPlay && (
           <button

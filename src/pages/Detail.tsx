@@ -196,11 +196,39 @@ export function ShowDetail() {
   const wl = isOnWatchlist(show.id)
 
   const sortedSeasons = [...show.seasons].sort((a, b) => a.number - b.number)
-  const currentSeason = sortedSeasons[selectedSeason]
+
+  // Unified season view: local seasons merged with TMDB seasons that have no local files
+  const seasonViews: Array<{ number: number; name: string; totalCount: number; local?: Season }> = []
+  {
+    const byNumber = new Map<number, { number: number; name: string; totalCount: number; local?: Season }>()
+    for (const ts of show.tmdbDetail?.seasons ?? []) {
+      if (ts.season_number === 0) continue // specials
+      byNumber.set(ts.season_number, {
+        number: ts.season_number,
+        name: ts.name ?? `Season ${ts.season_number}`,
+        totalCount: ts.episode_count ?? 0,
+      })
+    }
+    for (const ls of show.seasons) {
+      const v = byNumber.get(ls.number) ?? {
+        number: ls.number,
+        name: ls.tmdbSeason?.name ?? `Season ${ls.number}`,
+        totalCount: 0,
+      }
+      v.local = ls
+      if (v.totalCount < ls.episodes.length) v.totalCount = ls.episodes.length
+      byNumber.set(ls.number, v)
+    }
+    seasonViews.push(...byNumber.values())
+    seasonViews.sort((a, b) => a.number - b.number)
+  }
+
+  const currentSeasonView = seasonViews[Math.min(selectedSeason, seasonViews.length - 1)]
+  const currentLocal = currentSeasonView?.local
 
   const allEpisodeFileIds = show.seasons.flatMap((s) => s.episodes.map((e) => e.file.id))
   const showWatched = allEpisodeFileIds.length > 0 && allEpisodeFileIds.every((fid) => isFinished(fid))
-  const seasonWatched = !!currentSeason && currentSeason.episodes.length > 0 && currentSeason.episodes.every((e) => isFinished(e.file.id))
+  const seasonWatched = !!currentLocal && currentLocal.episodes.length > 0 && currentLocal.episodes.every((e) => isFinished(e.file.id))
 
   function playEpisode(ep: Episode) {
     navigate(`/play/show/${show!.id}/${ep.file.id}`)
@@ -244,27 +272,46 @@ export function ShowDetail() {
       deleteConfirm={deleteConfirm}
     >
       {/* Season selector + episodes */}
-      {sortedSeasons.length > 0 && (
+      {seasonViews.length > 0 && (
         <section className="mt-8">
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             <h3 className="text-white font-bold text-lg">{t.detail.episodes}</h3>
-            {sortedSeasons.length > 1 && (
+            {allEpisodeFileIds.length > 0 && (
+              <button
+                onClick={() => {
+                  const withEps = sortedSeasons.filter(s => s.episodes.length > 0)
+                  const season = withEps[Math.floor(Math.random() * withEps.length)]
+                  const ep = season.episodes[Math.floor(Math.random() * season.episodes.length)]
+                  playEpisode(ep)
+                }}
+                className="ml-2 text-xs font-medium px-3 py-1.5 rounded bg-premiumflix-surface border border-white/20 text-premiumflix-muted hover:text-white transition-colors"
+                title="Play a random episode"
+              >
+                🎲
+              </button>
+            )}
+            {seasonViews.length > 1 && (
               <select
-                value={selectedSeason}
+                value={Math.min(selectedSeason, seasonViews.length - 1)}
                 onChange={(e) => setSelectedSeason(parseInt(e.target.value))}
                 className="ml-4 bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-1.5 rounded outline-none cursor-pointer"
               >
-                {sortedSeasons.map((s, i) => (
-                  <option key={s.id} value={i}>
-                    {s.tmdbSeason?.name ?? `Season ${s.number}`}
-                  </option>
-                ))}
+                {seasonViews.map((v, i) => {
+                  const have = v.local?.episodes.length ?? 0
+                  const missing = !v.local || v.local.episodes.length === 0
+                  const count = v.totalCount > 0 && v.totalCount !== have ? ` · ${have}/${v.totalCount}` : ''
+                  return (
+                    <option key={`season-${v.number}`} value={i}>
+                      {v.name}{count}{missing ? ` — ${t.detail.notInLibrary}` : ''}
+                    </option>
+                  )
+                })}
               </select>
             )}
-            {currentSeason && currentSeason.episodes.length > 0 && (
+            {currentLocal && currentLocal.episodes.length > 0 && (
               <button
                 onClick={() => {
-                  const fids = currentSeason.episodes.map((e) => e.file.id)
+                  const fids = currentLocal.episodes.map((e) => e.file.id)
                   if (seasonWatched) clearFilesWatched(fids)
                   else markFilesWatched(fids)
                 }}
@@ -282,11 +329,37 @@ export function ShowDetail() {
             )}
           </div>
 
-          {currentSeason && (
-            <div className="space-y-2">
-              {[...currentSeason.episodes]
-                .sort((a, b) => a.number - b.number)
-                .map((ep) => {
+          {currentSeasonView && (() => {
+            const localEps = [...(currentLocal?.episodes ?? [])].sort((a, b) => a.number - b.number)
+            const localByNumber = new Map(localEps.map((e) => [e.number, e]))
+            const maxNumber = Math.max(currentSeasonView.totalCount, localEps.length)
+            const numbers: number[] = []
+            for (let n = 1; n <= maxNumber; n++) numbers.push(n)
+            if (numbers.length === 0) numbers.push(...localEps.map((e) => e.number))
+
+            return (
+              <div className="space-y-2">
+                {numbers.map((num) => {
+                  const ep = localByNumber.get(num)
+                  if (!ep) {
+                    return (
+                      <div
+                        key={`missing-${num}`}
+                        className="flex gap-3 bg-premiumflix-surface/40 rounded-md overflow-hidden opacity-60"
+                      >
+                        <div className="relative flex-shrink-0 w-32 sm:w-40 aspect-video bg-premiumflix-dark overflow-hidden flex items-center justify-center border border-dashed border-white/10">
+                          <span className="text-premiumflix-muted/40 text-xs">Ep {num}</span>
+                        </div>
+                        <div className="flex-1 min-w-0 py-3 pr-3 flex items-center">
+                          <p className="text-premiumflix-muted text-sm font-medium">
+                            Episode {num}
+                            <span className="text-premiumflix-muted/60 font-normal"> — {t.detail.notInLibrary}</span>
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  }
+
                   const fraction = getProgressFraction(ep.file.id)
                   const tmdbEp = ep.tmdbEpisode
                   const still = stillUrl(tmdbEp?.still_path)
@@ -359,8 +432,9 @@ export function ShowDetail() {
                     </div>
                   )
                 })}
-            </div>
-          )}
+              </div>
+            )
+          })()}
         </section>
       )}
     </DetailShell>
