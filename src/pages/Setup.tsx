@@ -8,7 +8,7 @@ import { FilmIcon, TvIcon } from '../components/icons'
 type Step = 'connect' | 'folders' | 'done'
 
 export function Setup() {
-  const { scan } = useLibrary()
+  const { scan, scanProgress } = useLibrary()
   const navigate = useNavigate()
 
   const [step, setStep] = useState<Step>('connect')
@@ -352,8 +352,41 @@ export function Setup() {
               <StepDot active />
             </div>
             <div className="w-12 h-12 border-4 border-premiumflix-red border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <h2 className="text-white text-xl font-bold mb-2">Scanning your library...</h2>
-            <p className="text-premiumflix-muted text-sm">This may take a minute. We'll redirect you when it's ready.</p>
+            <h2 className="text-white text-xl font-bold mb-2">
+              {scanProgress?.status ?? 'Scanning your library…'}
+            </h2>
+
+            {/* The first scan is the longest one a user ever waits through, so show
+                the same detail the in-app scan does rather than a bare spinner. */}
+            <div className="max-w-sm mx-auto mt-5">
+              <div className="bg-white/10 rounded-full h-2 overflow-hidden">
+                {scanProgress && scanProgress.metadataTotal > 0 ? (
+                  <div
+                    className="h-full bg-premiumflix-red transition-all duration-500"
+                    style={{ width: `${(scanProgress.metadataFetched / scanProgress.metadataTotal) * 100}%` }}
+                  />
+                ) : (
+                  <div className="h-full bg-premiumflix-red animate-pulse w-1/3" />
+                )}
+              </div>
+              {scanProgress && (
+                <>
+                  <div className="flex justify-between mt-2 text-premiumflix-muted text-xs">
+                    <span>{scanProgress.moviesFound} movies found</span>
+                    <span>{scanProgress.showsFound} shows found</span>
+                  </div>
+                  {scanProgress.metadataTotal > 0 && (
+                    <p className="text-premiumflix-muted text-xs text-center mt-1">
+                      Metadata: {scanProgress.metadataFetched} / {scanProgress.metadataTotal}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
+            <p className="text-premiumflix-muted text-sm mt-5">
+              This may take a minute. We'll redirect you when it's ready.
+            </p>
           </div>
         )}
 

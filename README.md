@@ -8,12 +8,19 @@
   <img alt="Vite" src="https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white&style=flat-square">
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white&style=flat-square">
   <img alt="Deploys on Vercel" src="https://img.shields.io/badge/Deploys%20on-Vercel-000000?logo=vercel&logoColor=white&style=flat-square">
+  <a href="https://github.com/sanid/premiumflix/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sanid/premiumflix?style=flat-square&color=E50914&label=download"></a>
+  <a href="LICENSE"><img alt="MIT licensed" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
 </p>
 
 <p align="center">
   <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fsanid%2Fpremiumflix&project-name=premiumflix&repository-name=premiumflix">
     <img src="https://vercel.com/button" alt="Deploy with Vercel" height="32">
   </a>
+</p>
+
+<p align="center">
+  <b><a href="https://github.com/sanid/premiumflix/releases/latest">Download the desktop app</a></b>
+  — macOS, Windows and Linux
 </p>
 
 ---
@@ -79,9 +86,17 @@ A sleek streaming frontend that connects directly to your Premiumize.me cloud st
 
 ## Desktop app
 
-Premiumflix also ships as a native desktop build (Tauri v2) for macOS, Windows
-and Linux. Grab a binary from the [releases page](https://github.com/sanid/premiumflix/releases),
-or build it yourself:
+Premiumflix also ships as a native desktop build (Tauri v2). Grab a binary from
+the [latest release](https://github.com/sanid/premiumflix/releases/latest):
+
+| Platform | File |
+| --- | --- |
+| macOS (Apple Silicon) | `Premiumflix_<version>_aarch64.dmg` |
+| macOS (Intel) | `Premiumflix_<version>_x64.dmg` |
+| Windows | `Premiumflix_<version>_x64-setup.exe` |
+| Linux | `Premiumflix_<version>_amd64.AppImage` or `.deb` |
+
+Or build it yourself:
 
 ```bash
 npm run desktop:build
