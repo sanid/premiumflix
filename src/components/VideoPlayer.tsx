@@ -3,6 +3,7 @@ import Hls from 'hls.js'
 import type { SubtitleTrack } from '../types'
 import type { PMSubtitle } from '../services/premiumize'
 import { debugLog } from '../lib/debug'
+import { appFetch, isTauri } from '../lib/platform'
 import { AlertTriangleIcon, XIcon } from './icons'
 
 interface VideoPlayerProps {
@@ -963,7 +964,7 @@ export function VideoPlayer({
       URL.revokeObjectURL(subtitleBlobRef.current)
       subtitleBlobRef.current = null
     }
-    fetch(proxyOsUrl(sub.dl_link))
+    appFetch(proxyOsUrl(sub.dl_link))
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.text()
@@ -1962,6 +1963,9 @@ export function VideoPlayer({
 // ─── Proxy OpenSubtitles URL ────────────────────────────────────────────────
 
 function proxyOsUrl(dlLink: string): string {
+  // Desktop fetches the upstream link as-is; Rust is not bound by mixed-content
+  // rules, so the http-only subtitle host needs no proxy.
+  if (isTauri()) return dlLink
   try {
     const url = new URL(dlLink)
     // Premiumize's subtitle host is http-only — never fetch it directly from

@@ -1,0 +1,44 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions plus outbound HTTP to the APIs Premiumflix talks to.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "https://www.premiumize.me/*"
+        },
+        {
+          "url": "https://treasure-maps.com/*"
+        },
+        {
+          "url": "https://file.treasure-maps.com/*"
+        },
+        {
+          "url": "http://pmsubs.prmapps.com/*"
+        },
+        {
+          "url": "https://dl.opensubtitles.org/*"
+        },
+        {
+          "url": "https://api.themoviedb.org/*"
+        },
+        {
+          "url": "https://api.imdbapi.dev/*"
+        },
+        {
+          "url": "https://yts.gg/*"
+        },
+        {
+          "url": "https://api.trakt.tv/*"
+        }
+      ]
+    }
+  ]
+}

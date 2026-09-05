@@ -14,6 +14,7 @@ import { useWatchProgress } from '../hooks/useWatchProgress'
 import type { ScanFolderSelection, PMItem } from '../types'
 import { useI18n } from '../contexts/I18nContext'
 import { AlertTriangleIcon, FolderIcon, FilmIcon, TvIcon, CheckIcon } from '../components/icons'
+import { isTauri } from '../lib/platform'
 
 export function Settings() {
   const { scan, clearAndRescan, isLoading, movies, tvShows, restoreFromCloud } = useLibrary()
@@ -23,6 +24,7 @@ export function Settings() {
 
   const [pmKey, setPmKey] = useState(localStorage.getItem('pm_api_key') || import.meta.env.VITE_PM_API_KEY || '')
   const [tmdbKey, setTmdbKey] = useState(localStorage.getItem('tmdb_api_key') || import.meta.env.VITE_TMDB_API_KEY || '')
+  const [nzbKey, setNzbKey] = useState(localStorage.getItem('scenenzbs_api_key') || import.meta.env.VITE_SCENENZBS_API_KEY || '')
   const [language, setLanguage] = useState(localStorage.getItem('tmdb_language') ?? 'en-US')
   const [savedLang, setSavedLang] = useState(localStorage.getItem('tmdb_language') ?? 'en-US')
   const [autoRescanHours, setAutoRescanHours] = useState(localStorage.getItem('auto_rescan_hours') ?? '0')
@@ -128,6 +130,7 @@ export function Settings() {
     localStorage.setItem('pm_api_key', pmKey.trim())
     localStorage.setItem('tmdb_api_key', tmdbKey.trim())
     localStorage.setItem('tmdb_language', language)
+    localStorage.setItem('scenenzbs_api_key', nzbKey.trim())
     localStorage.setItem('scan_folders', JSON.stringify(selectedFolders))
     localStorage.setItem('auto_rescan_hours', autoRescanHours)
     setSavedLang(language)
@@ -139,6 +142,7 @@ export function Settings() {
     localStorage.setItem('pm_api_key', pmKey.trim())
     localStorage.setItem('tmdb_api_key', tmdbKey.trim())
     localStorage.setItem('tmdb_language', language)
+    localStorage.setItem('scenenzbs_api_key', nzbKey.trim())
     localStorage.setItem('scan_folders', JSON.stringify(selectedFolders))
     localStorage.setItem('auto_rescan_hours', autoRescanHours)
     setSavedLang(language)
@@ -309,6 +313,24 @@ export function Settings() {
                 Get a free key at themoviedb.org — enables trailers, taglines &amp; localized metadata
               </p>
             </div>
+
+            {/* Desktop has no serverless proxy to hold the indexer key, so it is
+                entered here. On the web the Vercel function supplies it instead. */}
+            {isTauri() && (
+              <div>
+                <label className="text-premiumflix-muted text-sm block mb-1">NZB indexer API key</label>
+                <input
+                  type="text"
+                  value={nzbKey}
+                  onChange={(e) => setNzbKey(e.target.value)}
+                  className="w-full bg-premiumflix-surface border border-white/10 text-white text-sm px-3 py-2 rounded-md outline-none focus:border-white/40"
+                  placeholder="Leave empty to disable Usenet search"
+                />
+                <p className="text-premiumflix-muted/60 text-xs mt-1">
+                  From your treasure-maps.com profile — enables the Usenet tab on Add Movie
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="text-premiumflix-muted text-sm block mb-1">{t.settings.metadataLang}</label>

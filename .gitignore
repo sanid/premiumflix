@@ -28,3 +28,7 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Tauri
+src-tauri/target
+src-tauri/gen/schemas

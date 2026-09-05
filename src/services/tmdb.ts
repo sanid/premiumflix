@@ -1,3 +1,4 @@
+import { isTauri } from '../lib/platform'
 import type {
   TMDBSearchResult,
   TMDBMovieDetail,
@@ -13,7 +14,9 @@ import type {
 
 // When VITE_TMDB_USE_PROXY=true, requests go through api/tmdb/[...path].ts (Vercel Edge Function)
 // and the key stays on the server. Otherwise the user must supply their own key in Settings.
-const USE_PROXY = import.meta.env.VITE_TMDB_USE_PROXY === 'true'
+// A desktop build has no serverless function to proxy through, so it always calls
+// TMDB directly with the key from Settings, whatever the build flag says.
+const USE_PROXY = import.meta.env.VITE_TMDB_USE_PROXY === 'true' && !isTauri()
 const BASE_URL = USE_PROXY ? '/api/tmdb' : 'https://api.themoviedb.org/3'
 
 function getApiKey(): string {

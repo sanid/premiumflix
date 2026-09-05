@@ -1,3 +1,4 @@
+import { appFetch, isTauri } from '../lib/platform'
 export interface SceneNzbItem {
   title: string
   guid: string
@@ -18,19 +19,27 @@ export interface SceneNzbItem {
   seasons?: number[]
 }
 
-// Route through server-side proxy — key is never exposed to the browser.
-// Dev: Vite proxy at /scenenzbsapi → treasure-maps.com
-// Prod: Vercel serverless function at /api/scenenzbs
-const API_URL = import.meta.env.DEV
-  ? '/scenenzbsapi/api'
-  : '/api/scenenzbs'
+// Where the indexer lives depends on how the app is running:
+//   dev      → Vite proxy at /scenenzbsapi → treasure-maps.com
+//   web      → Vercel serverless function, which adds the key server-side
+//   desktop  → straight to the indexer over Tauri's Rust HTTP client, since the
+//              indexer sends no CORS headers and there is no function to proxy through
+const UPSTREAM = 'https://treasure-maps.com/api'
+
+function apiUrl(): string {
+  if (isTauri()) return UPSTREAM
+  return import.meta.env.DEV ? '/scenenzbsapi/api' : '/api/scenenzbs'
+}
+
+/** True when this build must supply the API key itself rather than a proxy doing it. */
+function needsClientKey(): boolean {
+  return isTauri() || import.meta.env.DEV
+}
 
 function getApiKey(): string {
-  // Only used in dev with the Vite proxy (key sent directly to treasure-maps.com).
-  // In production the Vercel function adds the key server-side.
-  const key = import.meta.env.VITE_SCENENZBS_API_KEY || ''
-  if (import.meta.env.DEV && !key) {
-    console.warn('SceneNZBs: VITE_SCENENZBS_API_KEY not set in .env')
+  const key = localStorage.getItem('scenenzbs_api_key') || import.meta.env.VITE_SCENENZBS_API_KEY || ''
+  if (needsClientKey() && !key) {
+    console.warn('SceneNZBs: no API key — set one in Settings or VITE_SCENENZBS_API_KEY')
   }
   return key
 }
@@ -88,10 +97,9 @@ function detectSeasonPack(title: string, episodeAttr?: number): { isSeasonPack: 
 export const NZB_MAX_LIMIT = 500
 
 export async function searchSceneNzbs(params: Record<string, string>): Promise<SceneNzbItem[]> {
-  const url = new URL(API_URL, window.location.href)
-  // In dev (Vite proxy) we still need to send the key directly.
-  // In prod the Vercel function injects it server-side.
-  if (import.meta.env.DEV) {
+  const url = new URL(apiUrl(), window.location.href)
+  // Dev and desktop send the key themselves; the web build lets the proxy add it.
+  if (needsClientKey()) {
     url.searchParams.set('apikey', getApiKey())
   }
   url.searchParams.set('o', 'json')
@@ -100,7 +108,7 @@ export async function searchSceneNzbs(params: Record<string, string>): Promise<S
     url.searchParams.set(k, v)
   }
 
-  const res = await fetch(url.toString())
+  const res = await appFetch(url.toString())
   const ct = res.headers.get('content-type') || ''
 
   if (!res.ok) {

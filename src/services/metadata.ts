@@ -1,3 +1,4 @@
+import { isTauri } from '../lib/platform'
 /**
  * Metadata facade — routes requests to TMDB (when the Vercel proxy is active or
  * the user has set their own key in Settings) or imdbapi.dev as a fallback.
@@ -15,8 +16,9 @@ import * as tmdb from './tmdb'
 import * as imdb from './imdb'
 
 export function isTMDB(): boolean {
-  // Server-side proxy active (Vercel deployment with TMDB_API_KEY set server-side)
-  if (import.meta.env.VITE_TMDB_USE_PROXY === 'true') return true
+  // Server-side proxy active (Vercel deployment with TMDB_API_KEY set server-side).
+  // Not available on desktop, where the user supplies their own key instead.
+  if (import.meta.env.VITE_TMDB_USE_PROXY === 'true' && !isTauri()) return true
   // User's own key set in Settings
   return !!(localStorage.getItem('tmdb_api_key')?.trim())
 }
