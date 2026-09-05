@@ -421,6 +421,11 @@ export function VideoPlayer({
   // ─── External subtitle loading ────────────────────────────────────────────
 
   useEffect(() => {
+    // OpenSubtitles tracks are appended imperatively by loadOpenSubtitle(), which
+    // sets activeSubtitle to an `os:` id. Bail out before the teardown below, or
+    // this effect would remove the track that call just added.
+    if (activeSubtitle?.startsWith('os:')) return
+
     const video = videoRef.current
     video?.querySelectorAll('track.subtitle-track').forEach((t) => t.remove())
     if (subtitleBlobRef.current) {
@@ -455,13 +460,7 @@ export function VideoPlayer({
         el.srclang = track.language !== 'unknown' ? track.language : ''
         el.src = url
         video.appendChild(el)
-
-        el.addEventListener('load', () => {
-          for (let i = 0; i < video.textTracks.length; i++) {
-            const tt = video.textTracks[i]
-            tt.mode = tt.label === track.label ? 'showing' : 'disabled'
-          }
-        }, { once: true })
+        activateTrack(video, el)
       })
       .catch((err) => {
         console.warn('[Player] Failed to load external subtitle:', err, track.directLink)
@@ -963,14 +962,7 @@ export function VideoPlayer({
         el.srclang = sub.iso_code || ''
         el.src = url
         videoRef.current.appendChild(el)
-        el.addEventListener('load', () => {
-          const v = videoRef.current
-          if (!v) return
-          for (let i = 0; i < v.textTracks.length; i++) {
-            const tt = v.textTracks[i]
-            tt.mode = tt.label === `${sub.language} (OS)` ? 'showing' : 'disabled'
-          }
-        }, { once: true })
+        activateTrack(videoRef.current, el)
         // Set as active
         setActiveSubtitle(`os:${sub.dl_link}`)
         setLoadingOpenSub(null)
@@ -1969,6 +1961,21 @@ function proxyOsUrl(dlLink: string): string {
   } catch {
     return dlLink
   }
+}
+
+// ─── Activate a freshly appended <track> ───────────────────────────────────
+//
+// A <track> element starts in mode "disabled", and browsers do not fetch the
+// cue file while a track is disabled. Waiting for its "load" event before
+// setting the mode therefore deadlocks — the load never happens. Set the mode
+// as soon as the element is in the DOM instead, and disable every other track.
+
+function activateTrack(video: HTMLVideoElement, el: HTMLTrackElement) {
+  for (let i = 0; i < video.textTracks.length; i++) {
+    const tt = video.textTracks[i]
+    if (tt !== el.track) tt.mode = 'disabled'
+  }
+  if (el.track) el.track.mode = 'showing'
 }
 
 // ─── SRT → WebVTT ─────────────────────────────────────────────────────────
