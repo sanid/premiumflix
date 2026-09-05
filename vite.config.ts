@@ -31,6 +31,13 @@ export default defineConfig(({ mode }) => {
           rewrite: (path) => path.replace(/^\/ossub/, ''),
           secure: true,
         },
+        // Premiumize subtitle proxy host is http-only
+        '/pmsubs': {
+          target: 'http://pmsubs.prmapps.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/pmsubs/, ''),
+          secure: false,
+        },
         // TMDB proxy (mirrors the Vercel function for local dev)
         '/api/tmdb': {
           target: 'https://api.themoviedb.org/3',
@@ -74,6 +81,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/ossub/, ''),
           secure: true,
+        },
+        '/pmsubs': {
+          target: 'http://pmsubs.prmapps.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/pmsubs/, ''),
+          secure: false,
         },
         '/api/tmdb': {
           target: 'https://api.themoviedb.org/3',

@@ -463,7 +463,9 @@ export function VideoPlayer({
           }
         }, { once: true })
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.warn('[Player] Failed to load external subtitle:', err, track.directLink)
+      })
 
     return () => { cancelled = true }
   }, [activeSubtitle, subtitles])
@@ -932,6 +934,53 @@ export function VideoPlayer({
 
   // ─── Mobile menu content builders ─────────────────────────────────────────
 
+  function loadOpenSubtitle(sub: PMSubtitle) {
+    const video = videoRef.current
+    if (!video) return
+    setLoadingOpenSub(sub.dl_link)
+    setActiveSubtitle(null)
+    // Remove old tracks
+    video.querySelectorAll('track.subtitle-track').forEach(t => t.remove())
+    if (subtitleBlobRef.current) {
+      URL.revokeObjectURL(subtitleBlobRef.current)
+      subtitleBlobRef.current = null
+    }
+    fetch(proxyOsUrl(sub.dl_link))
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.text()
+      })
+      .then(text => {
+        if (!videoRef.current) return
+        const vtt = sub.name.toLowerCase().endsWith('.vtt') ? text : srtToVtt(text)
+        const blob = new Blob([vtt], { type: 'text/vtt' })
+        const url = URL.createObjectURL(blob)
+        subtitleBlobRef.current = url
+        const el = document.createElement('track')
+        el.className = 'subtitle-track'
+        el.kind = 'subtitles'
+        el.label = `${sub.language} (OS)`
+        el.srclang = sub.iso_code || ''
+        el.src = url
+        videoRef.current.appendChild(el)
+        el.addEventListener('load', () => {
+          const v = videoRef.current
+          if (!v) return
+          for (let i = 0; i < v.textTracks.length; i++) {
+            const tt = v.textTracks[i]
+            tt.mode = tt.label === `${sub.language} (OS)` ? 'showing' : 'disabled'
+          }
+        }, { once: true })
+        // Set as active
+        setActiveSubtitle(`os:${sub.dl_link}`)
+        setLoadingOpenSub(null)
+      })
+      .catch((err) => {
+        console.warn('[Player] Failed to load OpenSubtitle:', err, sub.dl_link)
+        setLoadingOpenSub(null)
+      })
+  }
+
   function renderSubOffsetControl(hoverStyle: boolean) {
     if (!activeSubtitle && activeHlsSub < 0) return null
     const btnCls = hoverStyle
@@ -1028,9 +1077,44 @@ export function VideoPlayer({
           {track.label}
         </button>
       ))}
+      {/* OpenSubtitles matches from Premiumize API */}
+      {openSubtitles && openSubtitles.length > 0 && (
+        <>
+          {(hlsSubTracks.length > 0 || (subtitles && subtitles.length > 0)) && (
+            <div className="border-t border-white/10 my-1" />
+          )}
+          <div className="px-4 py-1 text-[10px] uppercase tracking-wider text-white/30 font-bold">
+            OpenSubtitles
+          </div>
+          {openSubtitles.map((sub) => (
+            <button
+              key={sub.dl_link}
+              onClick={() => {
+                userSubOffRef.current = false
+                if (hlsRef.current) hlsRef.current.subtitleTrack = -1
+                setActiveHlsSub(-1)
+                loadOpenSubtitle(sub)
+                closeAllMenus()
+              }}
+              className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                activeSubtitle === `os:${sub.dl_link}` ? 'bg-red-600 text-white' : 'text-white/80 active:bg-white/10'
+              }`}
+            >
+              {loadingOpenSub === sub.dl_link ? (
+                <span className="flex items-center gap-2">
+                  <span className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin inline-block" />
+                  Loading...
+                </span>
+              ) : (
+                <span>{sub.language} <span className="text-white/30 text-xs">{sub.name}</span></span>
+              )}
+            </button>
+          ))}
+        </>
+      )}
       {renderSubOffsetControl(true)}
     </>
-  ), [hlsSubTracks, subtitles, activeHlsSub, activeSubtitle, closeAllMenus, subOffset])
+  ), [hlsSubTracks, subtitles, activeHlsSub, activeSubtitle, closeAllMenus, subOffset, openSubtitles, loadingOpenSub])
 
   const settingsMenuContent = useMemo(() => (
     <>
@@ -1631,49 +1715,7 @@ export function VideoPlayer({
                                 userSubOffRef.current = false
                                 if (hlsRef.current) hlsRef.current.subtitleTrack = -1
                                 setActiveHlsSub(-1)
-                                // Load SRT from dl_link, convert to VTT, apply
-                                setLoadingOpenSub(sub.dl_link)
-                                setActiveSubtitle(null)
-                                const video = videoRef.current
-                                if (!video) return
-                                // Remove old tracks
-                                video.querySelectorAll('track.subtitle-track').forEach(t => t.remove())
-                                if (subtitleBlobRef.current) {
-                                  URL.revokeObjectURL(subtitleBlobRef.current)
-                                  subtitleBlobRef.current = null
-                                }
-                                fetch(proxyOsUrl(sub.dl_link))
-                                  .then(r => {
-                                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-                                    return r.text()
-                                  })
-                                  .then(text => {
-                                    if (!video) return
-                                    const vtt = sub.name.toLowerCase().endsWith('.vtt') ? text : srtToVtt(text)
-                                    const blob = new Blob([vtt], { type: 'text/vtt' })
-                                    const url = URL.createObjectURL(blob)
-                                    subtitleBlobRef.current = url
-                                    const el = document.createElement('track')
-                                    el.className = 'subtitle-track'
-                                    el.kind = 'subtitles'
-                                    el.label = `${sub.language} (OS)`
-                                    el.srclang = sub.iso_code || ''
-                                    el.src = url
-                                    video.appendChild(el)
-                                    el.addEventListener('load', () => {
-                                      for (let i = 0; i < video.textTracks.length; i++) {
-                                        const tt = video.textTracks[i]
-                                        tt.mode = tt.label === `${sub.language} (OS)` ? 'showing' : 'disabled'
-                                      }
-                                    }, { once: true })
-                                    // Set as active
-                                    setActiveSubtitle(`os:${sub.dl_link}`)
-                                    setLoadingOpenSub(null)
-                                  })
-                                  .catch((err) => {
-                                    console.warn('[Player] Failed to load OpenSubtitle:', err)
-                                    setLoadingOpenSub(null)
-                                  })
+                                loadOpenSubtitle(sub)
                                 setShowSubMenu(false)
                               }}
                               className={`w-full text-left px-4 py-2 text-sm transition-colors ${
@@ -1909,17 +1951,24 @@ export function VideoPlayer({
 // ─── Proxy OpenSubtitles URL ────────────────────────────────────────────────
 
 function proxyOsUrl(dlLink: string): string {
-  // In dev, route through Vite proxy to avoid CORS
-  if (import.meta.env.DEV) {
-    try {
-      const url = new URL(dlLink)
-      return `/ossub${url.pathname}${url.search}`
-    } catch {
-      return dlLink
+  try {
+    const url = new URL(dlLink)
+    // Premiumize's subtitle host is http-only — never fetch it directly from
+    // an https page (mixed content). Use the Vite proxy in dev and the
+    // allowlisted Vercel function in production.
+    if (url.hostname === 'pmsubs.prmapps.com') {
+      return import.meta.env.DEV
+        ? `/pmsubs${url.pathname}${url.search}`
+        : `/api/subtitles?src=${encodeURIComponent(dlLink)}`
     }
+    // Legacy OpenSubtitles links (no CORS headers)
+    if (import.meta.env.DEV) {
+      return `/ossub${url.pathname}${url.search}`
+    }
+    return `/api/subtitles?src=${encodeURIComponent(dlLink)}`
+  } catch {
+    return dlLink
   }
-  // In production, try direct (may or may not work depending on CORS)
-  return dlLink
 }
 
 // ─── SRT → WebVTT ─────────────────────────────────────────────────────────

@@ -248,17 +248,25 @@ export interface PMSubtitlesResponse {
 /**
  * Fetch available subtitles for a file from OpenSubtitles (via Premiumize API).
  * Matches subtitles by filename/hash.
+ *
+ * The API has two response shapes over time:
+ *  - current: [{ name, location, language, iso_code }] where location is an
+ *    http:// URL on pmsubs.prmapps.com (http-only host, CORS enabled)
+ *  - legacy:  [{ name, dl_link, language, iso_code }]
+ * Both are normalized to `dl_link` so callers don't need to care.
  */
 export async function fetchSubtitles(itemId: string): Promise<PMSubtitle[]> {
   try {
     const data = await pmPost<Record<string, any>>('item/subtitles', { id: itemId })
-    // API returns an object with numeric keys (like an array) or an array
-    if (Array.isArray(data)) return data as PMSubtitle[]
-    const entries = Object.values(data)
-    // Filter out non-subtitle fields like 'status'
-    return entries.filter(
-      (e: any) => e && typeof e === 'object' && e.name && e.dl_link
-    ) as PMSubtitle[]
+    const entries: any[] = Array.isArray(data) ? data : Object.values(data)
+    return entries
+      .filter((e) => e && typeof e === 'object' && e.name && (e.dl_link || e.location))
+      .map((e) => ({
+        name: e.name,
+        language: e.language ?? 'Unknown',
+        iso_code: e.iso_code ?? '',
+        dl_link: e.dl_link ?? e.location,
+      }))
   } catch {
     return []
   }
