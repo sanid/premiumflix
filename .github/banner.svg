@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="Premiumflix — your Premiumize cloud, as a streaming service">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#000000"/>
+      <stop offset="55%" stop-color="#141414"/>
+      <stop offset="100%" stop-color="#1c0508"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#E50914" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#E50914" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ff2d3c"/>
+      <stop offset="60%" stop-color="#E50914"/>
+      <stop offset="100%" stop-color="#8e0009"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="360" rx="18" fill="url(#bg)"/>
+  <ellipse cx="250" cy="120" rx="520" ry="300" fill="url(#glow)"/>
+  <ellipse cx="1120" cy="330" rx="420" ry="240" fill="url(#glow)" opacity="0.5"/>
+
+  <!-- faint film-strip perforations, top and bottom -->
+  <g fill="#ffffff" opacity="0.05">
+    <rect x="60" y="26" width="26" height="16" rx="4"/>
+    <rect x="116" y="26" width="26" height="16" rx="4"/>
+    <rect x="172" y="26" width="26" height="16" rx="4"/>
+    <rect x="228" y="26" width="26" height="16" rx="4"/>
+    <rect x="284" y="26" width="26" height="16" rx="4"/>
+    <rect x="340" y="26" width="26" height="16" rx="4"/>
+    <rect x="396" y="26" width="26" height="16" rx="4"/>
+    <rect x="452" y="26" width="26" height="16" rx="4"/>
+    <rect x="900" y="318" width="26" height="16" rx="4"/>
+    <rect x="956" y="318" width="26" height="16" rx="4"/>
+    <rect x="1012" y="318" width="26" height="16" rx="4"/>
+    <rect x="1068" y="318" width="26" height="16" rx="4"/>
+    <rect x="1124" y="318" width="26" height="16" rx="4"/>
+    <rect x="1180" y="318" width="26" height="16" rx="4"/>
+  </g>
+
+  <!-- app mark -->
+  <g transform="translate(96, 118)">
+    <rect width="124" height="124" rx="26" fill="#E50914"/>
+    <rect width="124" height="60" rx="26" fill="url(#fade)"/>
+    <path d="M48 34 L92 62 L48 90 Z" fill="#ffffff"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="256" y="186" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="86" font-weight="bold" letter-spacing="6" fill="url(#word)">PREMIUMFLIX</text>
+  <text x="260" y="232" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="25" font-weight="500" letter-spacing="1.5" fill="#e5e5e5">Your Premiumize cloud, as a streaming service.</text>
+
+  <!-- feature pills -->
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="16" font-weight="600" letter-spacing="0.8">
+    <g transform="translate(260, 258)">
+      <rect width="168" height="38" rx="19" fill="#ffffff" opacity="0.08"/>
+      <text x="84" y="25" text-anchor="middle" fill="#f5f5f5">HLS Streaming</text>
+    </g>
+    <g transform="translate(440, 258)">
+      <rect width="196" height="38" rx="19" fill="#ffffff" opacity="0.08"/>
+      <text x="98" y="25" text-anchor="middle" fill="#f5f5f5">TMDB Metadata</text>
+    </g>
+    <g transform="translate(648, 258)">
+      <rect width="150" height="38" rx="19" fill="#ffffff" opacity="0.08"/>
+      <text x="75" y="25" text-anchor="middle" fill="#f5f5f5">Trakt Sync</text>
+    </g>
+    <g transform="translate(810, 258)">
+      <rect width="176" height="38" rx="19" fill="#ffffff" opacity="0.08"/>
+      <text x="88" y="25" text-anchor="middle" fill="#f5f5f5">Offline-first</text>
+    </g>
+  </g>
+</svg>

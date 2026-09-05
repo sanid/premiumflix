@@ -1,4 +1,22 @@
-# Premiumflix
+<p align="center">
+  <img src=".github/banner.svg" alt="Premiumflix — your Premiumize cloud, as a streaming service" width="100%">
+</p>
+
+<p align="center">
+  <img alt="React 18" src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white&style=flat-square">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white&style=flat-square">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white&style=flat-square">
+  <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white&style=flat-square">
+  <img alt="Deploys on Vercel" src="https://img.shields.io/badge/Deploys%20on-Vercel-000000?logo=vercel&logoColor=white&style=flat-square">
+</p>
+
+<p align="center">
+  <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fsanid%2Fpremiumflix&project-name=premiumflix&repository-name=premiumflix">
+    <img src="https://vercel.com/button" alt="Deploy with Vercel" height="32">
+  </a>
+</p>
+
+---
 
 A sleek streaming frontend that connects directly to your Premiumize.me cloud storage. It scans your Premiumize folders, matches files with TMDB, and gives you a Netflix-like interface to stream your own media library right in the browser.
 
@@ -31,11 +49,11 @@ A sleek streaming frontend that connects directly to your Premiumize.me cloud st
 
 ## Running Locally
 
-1. Clone the repo
-2. Install dependencies: `npm install`
-3. Start the dev server: `npm run dev`
+```bash
+git clone https://github.com/sanid/premiumflix.git && cd premiumflix && npm install && npm run dev
+```
 
-You don't need to mess with config files out of the box. Just open the app and paste your Premiumize and TMDB API keys into the Settings page. 
+You don't need to mess with config files out of the box. Just open the app and paste your Premiumize and TMDB API keys into the Settings page.
 
 For Trakt sync, create a free app at [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications) and paste its client ID in Settings → Trakt Sync (or set `VITE_TRAKT_CLIENT_ID`).
 
@@ -45,10 +63,22 @@ If you prefer to use environment variables, you can create a `.env` file:
 VITE_PM_API_KEY=your_premiumize_key_here
 VITE_TMDB_API_KEY=your_tmdb_key_here
 VITE_SCENENZBS_API_KEY=your_scenenzbs_key_here
+VITE_TRAKT_CLIENT_ID=your_trakt_client_id_here
 ```
 
 ## Deployment
 
-Deploy to Vercel or Netlify. Premiumize supports CORS for API requests, so the browser can talk to them directly. A `vercel.json` is included for routing and serverless API proxies (TMDB, SceneNZBs).
+Click the button above to clone this repo into your own Vercel project, or deploy manually to Vercel or Netlify. Premiumize supports CORS for API requests, so the browser can talk to it directly. A `vercel.json` is included for SPA routing and the serverless API proxies (TMDB, SceneNZBs, subtitles).
 
-Set environment variables in your Vercel/Netlify dashboard for API keys you want to keep server-side.
+Everything works with keys entered in Settings, so no environment variables are required. Set them in your Vercel/Netlify dashboard only if you'd rather keep a key server-side:
+
+| Variable | Scope | Purpose |
+| --- | --- | --- |
+| `TMDB_API_KEY` | Server | Used by the `/api/tmdb` proxy so the key never reaches the browser. |
+| `SCENENZBS_API_KEY` | Server | Used by the SceneNZBs proxy; required for Usenet browsing. |
+| `VITE_PM_API_KEY` | Build | Pre-fills the Premiumize key instead of asking on first run. |
+| `VITE_TMDB_API_KEY` | Build | Pre-fills the TMDB key (client-side calls). |
+| `VITE_TMDB_USE_PROXY` | Build | Set to `true` to route TMDB calls through the serverless proxy. |
+| `VITE_TRAKT_CLIENT_ID` | Build | Pre-fills the Trakt client ID for device-code auth. |
+
+> `VITE_*` variables are baked into the client bundle at build time and are visible to anyone using the app — only use them on a deployment you keep private.
