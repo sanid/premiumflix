@@ -52,7 +52,6 @@
     "category": "Entertainment",
     "shortDescription": "Netflix-style frontend for your Premiumize cloud storage",
     "longDescription": "Premiumflix turns your Premiumize.me cloud storage into a streaming service: it scans your folders, matches titles with TMDB, and streams them with subtitles, resume, and Trakt sync.",
-    "copyright": "Copyright (c) 2026 Sanid Jusic",
-    "licenseFile": "../LICENSE"
+    "copyright": "Copyright (c) 2026 Sanid Jusic"
   }
 }
