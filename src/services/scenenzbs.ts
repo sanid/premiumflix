@@ -15,14 +15,14 @@ export interface SceneNzbItem {
 }
 
 // Route through server-side proxy — key is never exposed to the browser.
-// Dev: Vite proxy at /scenenzbsapi → scenenzbs.com
+// Dev: Vite proxy at /scenenzbsapi → treasure-maps.com
 // Prod: Vercel serverless function at /api/scenenzbs
 const API_URL = import.meta.env.DEV
   ? '/scenenzbsapi/api'
   : '/api/scenenzbs'
 
 function getApiKey(): string {
-  // Only used in dev with the Vite proxy (key sent directly to scenenzbs.com).
+  // Only used in dev with the Vite proxy (key sent directly to treasure-maps.com).
   // In production the Vercel function adds the key server-side.
   const key = import.meta.env.VITE_SCENENZBS_API_KEY || ''
   if (import.meta.env.DEV && !key) {
@@ -60,12 +60,19 @@ export async function searchSceneNzbs(params: Record<string, string>): Promise<S
   }
 
   const res = await fetch(url.toString())
-  if (!res.ok) throw new Error(`SceneNZBs HTTP ${res.status}`)
-
   const ct = res.headers.get('content-type') || ''
+
+  if (!res.ok) {
+    // The proxy reports upstream trouble as JSON; prefer its message over the status code.
+    if (ct.includes('json')) {
+      const detail = await res.json().catch(() => null)
+      if (detail?.error) throw new Error(detail.error)
+    }
+    throw new Error(`SceneNZBs HTTP ${res.status}`)
+  }
+
   if (!ct.includes('json') && !ct.includes('xml')) {
-    const text = await res.text()
-    throw new Error(`SceneNZBs returned non-JSON response (HTML page). Check your API key.`)
+    throw new Error('SceneNZBs returned an HTML page instead of API data. Check your API key.')
   }
 
   const data = await res.json()

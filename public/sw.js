@@ -37,7 +37,7 @@ self.addEventListener('fetch', (event) => {
     'premiumize.me',
     'themoviedb.org',
     'api.imdbapi.dev',
-    'scenenzbs.com',
+    'treasure-maps.com',
     'opensubtitles.org',
     'cdn77',
     'energycdn.com',

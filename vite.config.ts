@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
           secure: true,
         },
         '/scenenzbsapi': {
-          target: 'https://scenenzbs.com',
+          target: 'https://treasure-maps.com',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/scenenzbsapi/, ''),
           secure: true,
@@ -71,7 +71,7 @@ export default defineConfig(({ mode }) => {
           secure: true,
         },
         '/scenenzbsapi': {
-          target: 'https://scenenzbs.com',
+          target: 'https://treasure-maps.com',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/scenenzbsapi/, ''),
           secure: true,
